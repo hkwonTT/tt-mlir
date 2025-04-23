@@ -55,7 +55,8 @@ def set_graph_goldens(builder):
 # Helper: Mesh Sharding
 
 
-def full_to_shard_device(input, builder, dim, rank=4):
+def full_to_shard_device(input, builder, dim):
+    rank = len(builder._get_golden_tensor(input).shape)
     shard_shape = [1] * rank
     shard_shape[dim] = 2
     return builder.mesh_shard(
@@ -67,7 +68,8 @@ def full_to_shard_device(input, builder, dim, rank=4):
     )
 
 
-def shard_to_full_device(input, builder, dim, rank=4):
+def shard_to_full_device(input, builder, dim):
+    rank = len(builder._get_golden_tensor(input).shape)
     shard_shape = [1] * rank
     shard_shape[dim] = 2
     return builder.mesh_shard(
@@ -79,7 +81,7 @@ def shard_to_full_device(input, builder, dim, rank=4):
     )
 
 
-def shard_to_full_replicate(input, builder, dim, rank=4):
+def shard_to_full_replicate(input, builder):
     return builder.mesh_shard(
         input,
         shard_direction="#tt.shard_direction<shard_to_full>",
