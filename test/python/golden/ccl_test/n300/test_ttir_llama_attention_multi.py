@@ -17,7 +17,7 @@ from helpers import *
 
 @compile_to_flatbuffer(
     [
-        (1, 32, 3200),  # arg0   was : (1, 12, 3200)
+        (1, 32, 4096),  # arg0   was : (1, 12, 3200)
         # (1, 1, 12, 12),  # arg1
         # (1, 12),  # arg2
         # (1, 50, 1),  # arg3
@@ -28,7 +28,7 @@ from helpers import *
         # (1, 1),  # arg8
         # (1, 32, 50, 100),  # arg9
         # (1, 1),  # arg10
-        (3200, 3200),  # arg11
+        (4096, 4096),  # arg11
         # (3200, 3200),  # arg12
         # (3200, 3200),  # arg13
         # (3200, 3200),  # arg14
@@ -58,7 +58,9 @@ def test_llama_attention(
 
     output = output1 = builder.squeeze(arg0, 0)  # [12, 3200]
     output = output3 = builder.matmul(output1, arg11)  # [12, 3200]
-    # output = output5 = builder.reshape(output3, (1, 12, 32, 100))  # [1, 12, 32, 100]
+    output = output5 = builder.reshape(
+        output3, (1, 32, 32, 128)
+    )  # [1, 12, 32, 100]     was : (1, 12, 32, 100)
     # output = output7 = builder.transpose(output5, -3, -2)  # [1, 32, 12, 100]
     # output = output9 = builder.unsqueeze(arg2, 1)  # [1, 1, 12]
     # output = output11 = builder.matmul(arg3, output9)  # [1, 50, 12]
@@ -122,7 +124,7 @@ def test_llama_attention(
 
 @compile_to_flatbuffer(
     [
-        (1, 32, 3200),  # arg0   was : (1, 12, 3200)
+        (1, 32, 4096),  # arg0   was : (1, 12, 3200)
         # (1, 1, 12, 12),  # arg1
         # (1, 12),  # arg2
         # (1, 50, 1),  # arg3
@@ -133,7 +135,7 @@ def test_llama_attention(
         # (1, 1),  # arg8
         # (1, 32, 50, 100),  # arg9
         # (1, 1),  # arg10
-        (3200, 3200),  # arg11
+        (4096, 4096),  # arg11
         # (3200, 3200),  # arg12
         # (3200, 3200),  # arg13
         # (3200, 3200),  # arg14
@@ -170,8 +172,10 @@ def test_llama_attention_multidevice(
         reduce_type="#tt.reduce_type<sum>",
         cluster_axis=1,
     )
-    output = shard_to_full_replicate(output3, builder)
-    # output = output5 = builder.reshape(output3, (1, 12, 32, 100))  # [1, 12, 32, 100]
+    output = output5 = builder.reshape(
+        output3, (1, 32, 32, 128)
+    )  # [1, 12, 32, 100]     was : (1, 12, 32, 100)
+    output = shard_to_full_replicate(output5, builder)
     # output = output7 = builder.transpose(output5, -3, -2)  # [1, 32, 12, 100]
     # output = output9 = builder.unsqueeze(arg2, 1)  # [1, 1, 12]
     # output = output11 = builder.matmul(arg3, output9)  # [1, 50, 12]
