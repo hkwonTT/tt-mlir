@@ -12,8 +12,7 @@ from ttmlir.test_utils import compile_to_flatbuffer, set_output_path
 from ttmlir.ttir_builder import Operand, TTIRBuilder
 from ttmlir.passes import GoldenTensor, DataType
 
-graph_input_tensors = []
-graph_output_tensors = []
+from helpers import *
 
 
 @compile_to_flatbuffer(
@@ -35,23 +34,15 @@ def test_mnist(
     in4: Operand,  # Bias 2
     builder: TTIRBuilder,
 ):
-    global graph_input_tensors
-    graph_input_tensors = []
-    graph_input_tensors.append(builder._get_golden_tensor(in0))
-    graph_input_tensors.append(builder._get_golden_tensor(in1))
-    graph_input_tensors.append(builder._get_golden_tensor(in2))
-    graph_input_tensors.append(builder._get_golden_tensor(in3))
-    graph_input_tensors.append(builder._get_golden_tensor(in4))
-    matmul_1 = builder.matmul(in0, in1)
-    add_2 = builder.add(matmul_1, in2)
-    relu_3 = builder.relu(add_2)
-    matmul_5 = builder.matmul(relu_3, in3)
-    add_6 = builder.add(matmul_5, in4)
-    output = add_6
+    save_all_input_goldens(*locals().values(), builder=builder)
+    output = matmul_1 = builder.matmul(in0, in1)
+    output = add_2 = builder.add(matmul_1, in2)
+    output = relu_3 = builder.relu(add_2)
+    output = matmul_5 = builder.matmul(relu_3, in3)
+    output = add_6 = builder.add(matmul_5, in4)
     # output = builder.softmax(add_6, dimension=3)
-    global graph_output_tensors
-    global_output_tensors = []
-    graph_output_tensors.append(builder._get_golden_tensor(output))
+
+    save_all_output_goldens(output, builder=builder)
     return output
 
 
@@ -75,72 +66,31 @@ def test_mnist_multidevice(
     in4: Operand,  # Bias 2
     builder: TTIRBuilder,
 ):
-    global graph_input_tensors
-    global graph_output_tensors
-    builder.set_graph_input_output(graph_input_tensors, graph_output_tensors)
-
-    sharded_in0 = builder.mesh_shard(
-        in0,
-        shard_direction="#tt.shard_direction<full_to_shard>",
-        shard_type="#tt.shard_type<devices>",
-        shard_shape=[1, 1, 1, 2],
-        shard_dims=[-1, 3],
-    )
-    sharded_in1 = builder.mesh_shard(
-        in1,
-        shard_direction="#tt.shard_direction<full_to_shard>",
-        shard_type="#tt.shard_type<devices>",
-        shard_shape=[1, 1, 2, 1],
-        shard_dims=[-1, 2],
-    )
-    partial_matmul_1 = builder.matmul(sharded_in0, sharded_in1)
+    in0_sharded = full_to_shard_device(in0, builder, 3)
+    in1_sharded = full_to_shard_device(in1, builder, 2)
+    partial_matmul_1 = builder.matmul(in0_sharded, in1_sharded)
     matmul_1 = builder.reduce_scatter(
         partial_matmul_1,
         reduce_type="#tt.reduce_type<sum>",
         scatter_dim=3,
         cluster_axis=1,
     )
-    sharded_in2 = builder.mesh_shard(
-        in2,
-        shard_direction="#tt.shard_direction<full_to_shard>",
-        shard_type="#tt.shard_type<devices>",
-        shard_shape=[1, 1, 1, 2],
-        shard_dims=[-1, 3],
-    )
-    add_2 = builder.add(matmul_1, sharded_in2)
+    in2_sharded = full_to_shard_device(in2, builder, 3)
+    add_2 = builder.add(matmul_1, in2_sharded)
     relu_3 = builder.relu(add_2)
-
-    sharded_in3 = builder.mesh_shard(
-        in3,
-        shard_direction="#tt.shard_direction<full_to_shard>",
-        shard_type="#tt.shard_type<devices>",
-        shard_shape=[1, 1, 2, 1],
-        shard_dims=[-1, 2],
-    )
-    partial_matmul_5 = builder.matmul(relu_3, sharded_in3)
+    in3_sharded = full_to_shard_device(in3, builder, 2)
+    partial_matmul_5 = builder.matmul(relu_3, in3_sharded)
     matmul_5 = builder.reduce_scatter(
         partial_matmul_5,
         reduce_type="#tt.reduce_type<sum>",
         scatter_dim=3,
         cluster_axis=1,
     )
-    sharded_in4 = builder.mesh_shard(
-        in4,
-        shard_direction="#tt.shard_direction<full_to_shard>",
-        shard_type="#tt.shard_type<devices>",
-        shard_shape=[1, 1, 1, 2],
-        shard_dims=[-1, 3],
-    )
-    add_6 = builder.add(matmul_5, sharded_in4)
-
-    output = builder.mesh_shard(
-        add_6,
-        shard_direction="#tt.shard_direction<shard_to_full>",
-        shard_type="#tt.shard_type<devices>",
-        shard_shape=[1, 1, 1, 2],
-        shard_dims=[-1, 3],
-    )
+    in4_sharded = full_to_shard_device(in4, builder, 3)
+    add_6 = builder.add(matmul_5, in4_sharded)
+    output = shard_to_full_device(add_6, builder, 3)
     # output = builder.softmax(add_6, dimension=3)
+    set_graph_goldens(builder)
     return output
 
 
