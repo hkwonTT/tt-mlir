@@ -9,11 +9,9 @@ class _GS:
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super(_GS, cls).__new__(cls)
+            cls._instance.output_goldens = []
+            cls._instance.input_goldens = []
         return cls._instance
-
-    def __init__(self):
-        self.output_goldens = []
-        self.input_goldens = []
 
     def add_output_golden(self, golden):
         self.output_goldens.append(golden)
@@ -34,15 +32,15 @@ class _GS:
         return self.output_goldens
 
 
-def save_all_input_goldens(*args, builder):
+def save_all_input_goldens(args: list, builder):
     _GS().clear_input_goldens()
-    for arg in args[:-1]:
+    for arg in args:
         _GS().add_input_golden(builder._get_golden_tensor(arg))
 
 
-def save_all_output_goldens(*args, builder):
+def save_all_output_goldens(args: list, builder):
     _GS().clear_output_goldens()
-    for arg in args[:-1]:
+    for arg in args:
         _GS().add_output_golden(builder._get_golden_tensor(arg))
 
 

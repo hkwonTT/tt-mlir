@@ -18,7 +18,7 @@ from helpers import *
 @compile_to_flatbuffer(
     [
         (1, 32, 4096),  # arg0   was : (1, 12, 3200)
-        # (1, 1, 12, 12),  # arg1
+        (1, 1, 32, 32),  # arg1  was : (1, 1, 12, 12)
         # (1, 12),  # arg2
         # (1, 50, 1),  # arg3
         # (1, 32, 50, 100),  # arg4
@@ -39,7 +39,7 @@ from helpers import *
 def test_llama_attention(
     arg0: Operand,
     # arg1: Operand,
-    # arg2: Operand,
+    arg2: Operand,
     # arg3: Operand,
     # arg4: Operand,
     # arg5: Operand,
@@ -54,15 +54,17 @@ def test_llama_attention(
     # arg14: Operand,
     builder: TTIRBuilder,
 ):
-    save_all_input_goldens(*locals().values(), builder=builder)
+    save_all_input_goldens(
+        [v for k, v in locals().items() if k != "builder"], builder=builder
+    )
 
     output = output1 = builder.squeeze(arg0, 0)  # [12, 3200]
     output = output3 = builder.matmul(output1, arg11)  # [12, 3200]
     output = output5 = builder.reshape(
         output3, (1, 32, 32, 128)
     )  # [1, 12, 32, 100]     was : (1, 12, 32, 100)
-    # output = output7 = builder.transpose(output5, -3, -2)  # [1, 32, 12, 100]
-    # output = output9 = builder.unsqueeze(arg2, 1)  # [1, 1, 12]
+    output = output7 = builder.transpose(output5, -3, -2)  # [1, 32, 12, 100]
+    output = output9 = builder.unsqueeze(arg2, 1)  # [1, 1, 12]
     # output = output11 = builder.matmul(arg3, output9)  # [1, 50, 12]
     # output = output13 = builder.transpose(output11, -2, -1)  # [1, 12, 50]
     # output = output15 = builder.concat([output13, output13], -1)  # [1, 12, 100]
@@ -118,14 +120,14 @@ def test_llama_attention(
     # output111 = builder.reshape(output109, (12, 3200))
     # output113 = builder.matmul(output111, arg14)
     # output115 = builder.unsqueeze(output113, 0)
-    save_all_output_goldens(output, builder=builder)
+    save_all_output_goldens([output9, output7], builder=builder)
     return output
 
 
 @compile_to_flatbuffer(
     [
         (1, 32, 4096),  # arg0   was : (1, 12, 3200)
-        # (1, 1, 12, 12),  # arg1
+        (1, 1, 32, 32),  # arg1  was : (1, 1, 12, 12)
         # (1, 12),  # arg2
         # (1, 50, 1),  # arg3
         # (1, 32, 50, 100),  # arg4
@@ -147,7 +149,7 @@ def test_llama_attention(
 def test_llama_attention_multidevice(
     arg0: Operand,
     # arg1: Operand,
-    # arg2: Operand,
+    arg2: Operand,
     # arg3: Operand,
     # arg4: Operand,
     # arg5: Operand,
@@ -175,9 +177,9 @@ def test_llama_attention_multidevice(
     output = output5 = builder.reshape(
         output3, (1, 32, 32, 128)
     )  # [1, 12, 32, 100]     was : (1, 12, 32, 100)
-    output = shard_to_full_replicate(output5, builder)
-    # output = output7 = builder.transpose(output5, -3, -2)  # [1, 32, 12, 100]
-    # output = output9 = builder.unsqueeze(arg2, 1)  # [1, 1, 12]
+    output = output7 = builder.transpose(output5, -3, -2)  # [1, 32, 12, 100]
+    output = shard_to_full_replicate(output7, builder)
+    output = output9 = builder.unsqueeze(arg2, 1)  # [1, 1, 12]
     # output = output11 = builder.matmul(arg3, output9)  # [1, 50, 12]
     # output = output13 = builder.transpose(output11, -2, -1)  # [1, 12, 50]
     # output = output15 = builder.concat([output13, output13], -1)  # [1, 12, 100]
