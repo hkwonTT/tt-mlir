@@ -18,9 +18,9 @@ from helpers import *
 @compile_to_flatbuffer(
     [
         (1, 32, 4096),  # arg0   was : (1, 12, 3200)
-        (1, 1, 32, 32),  # arg1  was : (1, 1, 12, 12)
-        # (1, 12),  # arg2
-        # (1, 50, 1),  # arg3
+        # (1, 1, 32, 32),  # arg1  was : (1, 1, 12, 12)
+        (1, 32),  # arg2  was : (1, 12)
+        (1, 64, 1),  # arg3  was : (1, 50, 1)
         # (1, 32, 50, 100),  # arg4
         # (1, 1),  # arg5
         # (1, 32, 50, 100),  # arg6
@@ -40,7 +40,7 @@ def test_llama_attention(
     arg0: Operand,
     # arg1: Operand,
     arg2: Operand,
-    # arg3: Operand,
+    arg3: Operand,
     # arg4: Operand,
     # arg5: Operand,
     # arg6: Operand,
@@ -65,7 +65,7 @@ def test_llama_attention(
     )  # [1, 12, 32, 100]     was : (1, 12, 32, 100)
     output = output7 = builder.transpose(output5, -3, -2)  # [1, 32, 12, 100]
     output = output9 = builder.unsqueeze(arg2, 1)  # [1, 1, 12]
-    # output = output11 = builder.matmul(arg3, output9)  # [1, 50, 12]
+    output = output11 = builder.matmul(arg3, output9)  # [1, 50, 12]
     # output = output13 = builder.transpose(output11, -2, -1)  # [1, 12, 50]
     # output = output15 = builder.concat([output13, output13], -1)  # [1, 12, 100]
     # output = output17 = builder.cos(output15)  # [1, 12, 100]
@@ -120,16 +120,16 @@ def test_llama_attention(
     # output111 = builder.reshape(output109, (12, 3200))
     # output113 = builder.matmul(output111, arg14)
     # output115 = builder.unsqueeze(output113, 0)
-    save_all_output_goldens([output9, output7], builder=builder)
+    save_all_output_goldens([output11, output7], builder=builder)
     return output
 
 
 @compile_to_flatbuffer(
     [
         (1, 32, 4096),  # arg0   was : (1, 12, 3200)
-        (1, 1, 32, 32),  # arg1  was : (1, 1, 12, 12)
-        # (1, 12),  # arg2
-        # (1, 50, 1),  # arg3
+        # (1, 1, 32, 32),  # arg1  was : (1, 1, 12, 12)
+        (1, 32),  # arg2   # was : (1, 12)
+        (1, 64, 1),  # arg3  was : (1, 50, 1)
         # (1, 32, 50, 100),  # arg4
         # (1, 1),  # arg5
         # (1, 32, 50, 100),  # arg6
@@ -150,7 +150,7 @@ def test_llama_attention_multidevice(
     arg0: Operand,
     # arg1: Operand,
     arg2: Operand,
-    # arg3: Operand,
+    arg3: Operand,
     # arg4: Operand,
     # arg5: Operand,
     # arg6: Operand,
@@ -179,8 +179,16 @@ def test_llama_attention_multidevice(
     )  # [1, 12, 32, 100]     was : (1, 12, 32, 100)
     output = output7 = builder.transpose(output5, -3, -2)  # [1, 32, 12, 100]
     output = shard_to_full_replicate(output7, builder)
+    arg2 = full_to_shard_device(arg2, builder, 1)
     output = output9 = builder.unsqueeze(arg2, 1)  # [1, 1, 12]
-    # output = output11 = builder.matmul(arg3, output9)  # [1, 50, 12]
+    arg3 = full_to_shard_device(arg3, builder, 1)
+    output = output11 = builder.matmul(arg3, output9)  # [1, 50, 12]
+    output = output11 = builder.all_reduce(
+        output11,
+        reduce_type="#tt.reduce_type<sum>",
+        cluster_axis=1,
+    )
+    output = output11 = shard_to_full_replicate(output11, builder)
     # output = output13 = builder.transpose(output11, -2, -1)  # [1, 12, 50]
     # output = output15 = builder.concat([output13, output13], -1)  # [1, 12, 100]
     # output = output17 = builder.cos(output15)  # [1, 12, 100]
