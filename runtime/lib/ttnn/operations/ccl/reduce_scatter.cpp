@@ -10,6 +10,7 @@
 #include "tt/runtime/ttnn/utils.h"
 #include "ttnn/operations/ccl/ccl_host_types.hpp"
 #include "ttnn/operations/ccl/reduce_scatter/reduce_scatter.hpp"
+#include "ttnn/operations/experimental/ccl/reduce_scatter_async/reduce_scatter.hpp"
 
 namespace tt::runtime::ttnn::operations::ccl {
 void run(const ::tt::target::ttnn::ReduceScatterOp *op,
@@ -36,9 +37,29 @@ void run(const ::tt::target::ttnn::ReduceScatterOp *op,
 
   ::ttnn::MeshDevice &meshDevice =
       context.getSubMesh(op->device()->global_id());
-  ::ttnn::Tensor out = ::ttnn::reduce_scatter(
-      input, scatterDimension, clusterAxis, meshDevice, reduceType, numLinks,
-      outputMemoryConfig, ::ttnn::ccl::Topology::Linear);
+  //   ::ttnn::Tensor out = ::ttnn::reduce_scatter(
+  //       input, scatterDimension, clusterAxis, meshDevice, reduceType,
+  //       numLinks, outputMemoryConfig, ::ttnn::ccl::Topology::Linear);
+
+  ::ttnn::global_semaphore::MultiDeviceGlobalSemaphore from_semaphore =
+      ::ttnn::global_semaphore::create_global_semaphore(
+          &meshDevice,
+          meshDevice.worker_cores(
+              ::tt::tt_metal::HalProgrammableCoreType::TENSIX,
+              ::tt::tt_metal::SubDeviceId{0}),
+          0, tt::tt_metal::BufferType::L1);
+  ::ttnn::global_semaphore::MultiDeviceGlobalSemaphore to_semaphore =
+      ::ttnn::global_semaphore::create_global_semaphore(
+          &meshDevice,
+          meshDevice.worker_cores(
+              ::tt::tt_metal::HalProgrammableCoreType::TENSIX,
+              ::tt::tt_metal::SubDeviceId{0}),
+          0, tt::tt_metal::BufferType::L1);
+  ::ttnn::Tensor out = ::ttnn::experimental::reduce_scatter_async(
+      input, scatterDimension, clusterAxis, meshDevice, from_semaphore,
+      to_semaphore, std::nullopt, reduceType, outputMemoryConfig,
+      ::ttnn::ccl::Topology::Linear, numLinks, std::nullopt);
+  // replace with experiment op here
 
   tensorPool.insertTTNNTensorAndValidate(op->out(), out);
 }
