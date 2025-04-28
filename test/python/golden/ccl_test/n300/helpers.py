@@ -66,6 +66,16 @@ def full_to_shard_device(input, builder, dim):
     )
 
 
+def full_to_shard_replicate(input, builder):
+    return builder.mesh_shard(
+        input,
+        shard_direction="#tt.shard_direction<full_to_shard>",
+        shard_type="#tt.shard_type<replicate>",
+        shard_shape=[1],
+        shard_dims=[-1],
+    )
+
+
 def shard_to_full_device(input, builder, dim):
     rank = len(builder._get_golden_tensor(input).shape)
     shard_shape = [1] * rank
