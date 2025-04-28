@@ -14,7 +14,7 @@ from helpers import *
 
 @compile_to_flatbuffer(
     [
-        (1, 256, 4096),  # arg0
+        (1, 256, 16384),  # arg0
         # (1, 1, 256, 256),  # arg1
         (1, 256),  # arg2
         (1, 256, 1),  # arg3
@@ -25,10 +25,10 @@ from helpers import *
         # (1, 1),  # arg8
         # (1, 32, 256, 128),  # arg9
         # (1, 1),  # arg10
-        (4096, 4096),  # arg11
-        # (4096, 4096),  # arg12
-        # (4096, 4096),  # arg13
-        # (4096, 4096),  # arg14
+        (16384, 16384),  # arg11
+        # (16384, 16384),  # arg12
+        # (16384, 16384),  # arg13
+        # (16384, 16384),  # arg14
     ],
     targets=["ttnn"],
     module_dump=True,
@@ -55,17 +55,17 @@ def test_llama_attention(
         [v for k, v in locals().items() if k != "builder"], builder=builder
     )
 
-    output = output1 = builder.squeeze(arg0, 0)  # [256, 4096]
-    output = output3 = builder.matmul(output1, arg11)  # [256, 4096]
-    # output = output5 = builder.reshape(output3, (1, 256, 32, 128))    # [1, 256, 32, 128]
-    # output = output7 = builder.transpose(output5, -3, -2)    # [1, 32, 256, 128]
+    output = output1 = builder.squeeze(arg0, 0)  # [256, 16384]
+    output = output3 = builder.matmul(output1, arg11)  # [256, 16384]
+    output = output5 = builder.reshape(output3, (1, 256, 32, 512))  # [1, 256, 32, 128]
+    output = output7 = builder.transpose(output5, -3, -2)  # [1, 32, 256, 128]
     output = output9 = builder.unsqueeze(arg2, 1)  # [1, 1, 256]
     output = output11 = builder.matmul(arg3, output9)  # [1, 256, 256]
     output = output13 = builder.transpose(output11, -2, -1)  # [1, 256, 256]
     output = output15 = builder.concat([output13, output13], -1)  # [1, 256, 512]
-    output = output17 = builder.cos(output15)  # [1, 256, 128]
-    output = output19 = builder.unsqueeze(output17, 1)  # [1, 1, 256, 128]
-    # output = output21 = builder.multiply(output7, output19)    # [1, 32, 256, 128]
+    output = output17 = builder.cos(output15)  # [1, 256, 512]
+    output = output19 = builder.unsqueeze(output17, 1)  # [1, 1, 256, 512]
+    output = output21 = builder.multiply(output7, output19)  # [1, 32, 256, 512]
     # output = output23 = builder.transpose(output7, -2, -1)    # [1, 32, 128, 256]
     # output = output25 = builder.matmul(arg4, output23)    # [1, 32, 256, 256]
     # output = output27 = builder.transpose(output25, -2, -1)    # [1, 32, 256, 256]
@@ -79,7 +79,7 @@ def test_llama_attention(
     # output = output43 = builder.multiply(output37, output41)    # [1, 32, 256, 128]
     # output = output45 = builder.add(output21, output43)    # [1, 32, 256, 128]
     # output = output47 = builder.squeeze(output45, 0)    # [32, 256, 128]
-    # output = output49 = builder.matmul(output1, arg12)    # [256, 4096]
+    # output = output49 = builder.matmul(output1, arg12)    # [256, 16384]
     # output = output51 = builder.reshape(output49, (1, 256, 32, 128))    # [1, 256, 32, 128]
     # output = output53 = builder.transpose(output51, -3, -2)    # [1, 32, 256, 128]
     # output = output55 = builder.multiply(output53, output19)    # [1, 32, 256, 128]
@@ -102,7 +102,7 @@ def test_llama_attention(
     # output = output87 = builder.add(output85, arg1)    # [1, 32, 256, 256]
     # output = output89 = builder.softmax(output87, -1)    # [1, 32, 256, 256]
     # output = output91 = builder.squeeze(output89, 0)    # [32, 256, 256]
-    # output = output93 = builder.matmul(output1, arg13)    # [256, 4096]
+    # output = output93 = builder.matmul(output1, arg13)    # [256, 16384]
     # output = output95 = builder.reshape(output93, (1, 256, 32, 128))    # [1, 256, 32, 128]
     # output = output97 = builder.transpose(output95, -3, -2)    # [1, 32, 256, 128]
     # output = output99 = builder.transpose(output97, -2, -1)    # [1, 32, 128, 256]
@@ -111,17 +111,17 @@ def test_llama_attention(
     # output = output105 = builder.matmul(output91, output103)    # [32, 256, 128]
     # output = output107 = builder.unsqueeze(output105, 0)    # [1, 32, 256, 128]
     # output = output109 = builder.transpose(output107, -3, -2)    # [1, 256, 32, 128]
-    # output = output111 = builder.reshape(output109, (256, 4096))    # [256, 4096]
-    # output = output113 = builder.matmul(output111, arg14)    # [256, 4096]
-    # output = output115 = builder.unsqueeze(output113, 0)    # [1, 256, 4096]
+    # output = output111 = builder.reshape(output109, (256, 16384))    # [256, 16384]
+    # output = output113 = builder.matmul(output111, arg14)    # [256, 16384]
+    # output = output115 = builder.unsqueeze(output113, 0)    # [1, 256, 16384]
 
-    save_all_output_goldens([output19, output3], builder=builder)
+    save_all_output_goldens([output], builder=builder)
     return output
 
 
 @compile_to_flatbuffer(
     [
-        (1, 256, 4096),  # arg0
+        (1, 256, 16384),  # arg0
         # (1, 1, 256, 256),  # arg1
         (1, 256),  # arg2
         (1, 256, 1),  # arg3
@@ -132,10 +132,10 @@ def test_llama_attention(
         # (1, 1),  # arg8
         # (1, 32, 256, 128),  # arg9
         # (1, 1),  # arg10
-        (4096, 4096),  # arg11
-        # (4096, 4096),  # arg12
-        # (4096, 4096),  # arg13
-        # (4096, 4096),  # arg14
+        (16384, 16384),  # arg11
+        # (16384, 16384),  # arg12
+        # (16384, 16384),  # arg13
+        # (16384, 16384),  # arg14
     ],
     targets=["ttnn"],
     mesh_shape=[1, 2],
@@ -159,24 +159,26 @@ def test_llama_attention_multidevice(
     # arg14: Operand,
     builder: TTIRBuilder,
 ):
-    output = output1 = builder.squeeze(arg0, 0)  # [256, 4096]
+    set_graph_goldens(builder)
+    output = output1 = builder.squeeze(arg0, 0)  # [256, 16384]
     output1 = full_to_shard_device(output1, builder, 1)
     arg11 = full_to_shard_device(arg11, builder, 0)
-    output = output3 = builder.matmul(output1, arg11)  # [256, 4096]
-    # output = output3 = builder.all_reduce(
-    #     output3,
-    #     reduce_type="#tt.reduce_type<sum>",
-    #     cluster_axis=1,
-    # )
-    output = output3 = builder.reduce_scatter(
+    output = output3 = builder.matmul(output1, arg11)  # [256, 16384]
+    output = output3 = builder.all_reduce(
         output3,
         reduce_type="#tt.reduce_type<sum>",
-        scatter_dim=1,
         cluster_axis=1,
     )
-    output = output3 = shard_to_full_device(output3, builder, 1)
-    # output = output5 = builder.reshape(output3, (1, 256, 32, 128))    # [1, 256, 32, 128]
-    # output = output7 = builder.transpose(output5, -3, -2)    # [1, 32, 256, 128]
+    # output = output3 = builder.reduce_scatter(
+    #     output3,
+    #     reduce_type="#tt.reduce_type<sum>",
+    #     scatter_dim=1,
+    #     cluster_axis=1,
+    # )
+    output = output5 = builder.reshape(output3, (1, 256, 32, 512))  # [1, 256, 32, 512]
+    output = output7 = builder.transpose(output5, -3, -2)  # [1, 32, 256, 512]
+    output = output7 = shard_to_full_replicate(output7, builder)
+    output = output7 = full_to_shard_device(output7, builder, 3)
     output = output9 = builder.unsqueeze(arg2, 1)  # [1, 1, 256]
     output9 = full_to_shard_device(output9, builder, 2)
     arg3 = full_to_shard_replicate(arg3, builder)
@@ -193,8 +195,8 @@ def test_llama_attention_multidevice(
     # output = shard_to_full_replicate(output, builder)
     output = output17 = builder.cos(output13)  # [1, 256, 128]
     output = output19 = builder.unsqueeze(output17, 1)  # [1, 1, 256, 128]
+    output = output21 = builder.multiply(output7, output19)  # [1, 32, 256, 128]
     output = shard_to_full_device(output, builder, dim=3)
-    # output = output21 = builder.multiply(output7, output19)    # [1, 32, 256, 128]
     # output = output23 = builder.transpose(output7, -2, -1)    # [1, 32, 128, 256]
     # output = output25 = builder.matmul(arg4, output23)    # [1, 32, 256, 256]
     # output = output27 = builder.transpose(output25, -2, -1)    # [1, 32, 256, 256]
@@ -208,7 +210,7 @@ def test_llama_attention_multidevice(
     # output = output43 = builder.multiply(output37, output41)    # [1, 32, 256, 128]
     # output = output45 = builder.add(output21, output43)    # [1, 32, 256, 128]
     # output = output47 = builder.squeeze(output45, 0)    # [32, 256, 128]
-    # output = output49 = builder.matmul(output1, arg12)    # [256, 4096]
+    # output = output49 = builder.matmul(output1, arg12)    # [256, 16384]
     # output = output51 = builder.reshape(output49, (1, 256, 32, 128))    # [1, 256, 32, 128]
     # output = output53 = builder.transpose(output51, -3, -2)    # [1, 32, 256, 128]
     # output = output55 = builder.multiply(output53, output19)    # [1, 32, 256, 128]
@@ -231,7 +233,7 @@ def test_llama_attention_multidevice(
     # output = output87 = builder.add(output85, arg1)    # [1, 32, 256, 256]
     # output = output89 = builder.softmax(output87, -1)    # [1, 32, 256, 256]
     # output = output91 = builder.squeeze(output89, 0)    # [32, 256, 256]
-    # output = output93 = builder.matmul(output1, arg13)    # [256, 4096]
+    # output = output93 = builder.matmul(output1, arg13)    # [256, 16384]
     # output = output95 = builder.reshape(output93, (1, 256, 32, 128))    # [1, 256, 32, 128]
     # output = output97 = builder.transpose(output95, -3, -2)    # [1, 32, 256, 128]
     # output = output99 = builder.transpose(output97, -2, -1)    # [1, 32, 128, 256]
@@ -240,10 +242,9 @@ def test_llama_attention_multidevice(
     # output = output105 = builder.matmul(output91, output103)    # [32, 256, 128]
     # output = output107 = builder.unsqueeze(output105, 0)    # [1, 32, 256, 128]
     # output = output109 = builder.transpose(output107, -3, -2)    # [1, 256, 32, 128]
-    # output = output111 = builder.reshape(output109, (256, 4096))    # [256, 4096]
-    # output = output113 = builder.matmul(output111, arg14)    # [256, 4096]
-    # output = output115 = builder.unsqueeze(output113, 0)    # [1, 256, 4096]
-    set_graph_goldens(builder)
+    # output = output111 = builder.reshape(output109, (256, 16384))    # [256, 16384]
+    # output = output113 = builder.matmul(output111, arg14)    # [256, 16384]
+    # output = output115 = builder.unsqueeze(output113, 0)    # [1, 256, 16384]
 
     return output
 
