@@ -11,27 +11,32 @@ from ttmlir.ttir_builder import Operand, TTIRBuilder
 
 from helpers import *
 
-seq_len = 12
-hidden_stage_len = 3200
+seq_len = 128
+num_of_heads = 32
+head_dim = 128  # int(hidden_stage_size / num_of_heads)
+hidden_stage_size = num_of_heads * head_dim
+rotary_dim = int(head_dim / 2)
+
+print(f"hidden_stage_size: {hidden_stage_size}")
 
 
 @compile_to_flatbuffer(
     [
-        (1, seq_len, hidden_stage_len),  # arg0 # (1, 12, 3200)
+        (1, seq_len, hidden_stage_size),  # arg0 # (1, 12, 3200)
         (1, 1, seq_len, seq_len),  # arg1 # (1, 1, 12, 12)
         (1, seq_len),  # arg2 # (1, 12)
-        (1, 50, 1),  # arg3 # (1, 50, 1)
-        (1, 32, 50, 100),  # arg4 # (1, 32, 50, 100)
+        (1, rotary_dim, 1),  # arg3 # (1, 50, 1)
+        (1, num_of_heads, rotary_dim, head_dim),  # arg4 # (1, 32, 50, 100)
         (1, 1),  # arg5 # (1, 1)
-        (1, 32, 50, 100),  # arg6 # (1, 32, 50, 100)
-        (1, 32, 50, 100),  # arg7 # (1, 32, 50, 100)
+        (1, num_of_heads, rotary_dim, head_dim),  # arg6 # (1, 32, 50, 100)
+        (1, num_of_heads, rotary_dim, head_dim),  # arg7 # (1, 32, 50, 100)
         (1, 1),  # arg8 # (1, 1)
-        (1, 32, 50, 100),  # arg9 # (1, 32, 50, 100)
+        (1, num_of_heads, rotary_dim, head_dim),  # arg9 # (1, 32, 50, 100)
         (1, 1),  # arg10 # (1, 1)
-        (hidden_stage_len, hidden_stage_len),  # arg11 # (3200, 3200)
-        (hidden_stage_len, hidden_stage_len),  # arg12 # (3200, 3200)
-        (hidden_stage_len, hidden_stage_len),  # arg13 # (3200, 3200)
-        (hidden_stage_len, hidden_stage_len),  # arg14 # (3200, 3200)
+        (hidden_stage_size, hidden_stage_size),  # arg11 # (3200, 3200)
+        (hidden_stage_size, hidden_stage_size),  # arg12 # (3200, 3200)
+        (hidden_stage_size, hidden_stage_size),  # arg13 # (3200, 3200)
+        (hidden_stage_size, hidden_stage_size),  # arg14 # (3200, 3200)
     ],
     targets=["ttnn"],
     module_dump=True,
@@ -55,9 +60,25 @@ def test_shape_calc_llama_attention(
     builder: TTIRBuilder,
 ):
 
+    print(f"        {tuple(builder._get_golden_tensor(arg0).shape)},  # arg0")
+    print(f"        {tuple(builder._get_golden_tensor(arg1).shape)},  # arg1")
+    print(f"        {tuple(builder._get_golden_tensor(arg2).shape)},  # arg2")
+    print(f"        {tuple(builder._get_golden_tensor(arg3).shape)},  # arg3")
+    print(f"        {tuple(builder._get_golden_tensor(arg4).shape)},  # arg4")
+    print(f"        {tuple(builder._get_golden_tensor(arg5).shape)},  # arg5")
+    print(f"        {tuple(builder._get_golden_tensor(arg6).shape)},  # arg6")
+    print(f"        {tuple(builder._get_golden_tensor(arg7).shape)},  # arg7")
+    print(f"        {tuple(builder._get_golden_tensor(arg8).shape)},  # arg8")
+    print(f"        {tuple(builder._get_golden_tensor(arg9).shape)},  # arg9")
+    print(f"        {tuple(builder._get_golden_tensor(arg10).shape)},  # arg10")
+    print(f"        {tuple(builder._get_golden_tensor(arg11).shape)},  # arg11")
+    print(f"        {tuple(builder._get_golden_tensor(arg12).shape)},  # arg12")
+    print(f"        {tuple(builder._get_golden_tensor(arg13).shape)},  # arg13")
+    print(f"        {tuple(builder._get_golden_tensor(arg14).shape)},  # arg14")
+
     output1 = builder.squeeze(arg0, 0)
     output3 = builder.matmul(output1, arg11)
-    output5 = builder.reshape(output3, (1, 12, 32, 100))
+    output5 = builder.reshape(output3, (1, seq_len, num_of_heads, head_dim))
     output7 = builder.transpose(output5, -3, -2)
     output9 = builder.unsqueeze(arg2, 1)
     output11 = builder.matmul(arg3, output9)
@@ -80,7 +101,7 @@ def test_shape_calc_llama_attention(
     output45 = builder.add(output21, output43)
     output47 = builder.squeeze(output45, 0)
     output49 = builder.matmul(output1, arg12)
-    output51 = builder.reshape(output49, (1, 12, 32, 100))
+    output51 = builder.reshape(output49, (1, seq_len, num_of_heads, head_dim))
     output53 = builder.transpose(output51, -3, -2)
     output55 = builder.multiply(output53, output19)
     output57 = builder.transpose(output53, -2, -1)
@@ -102,7 +123,7 @@ def test_shape_calc_llama_attention(
     output89 = builder.softmax(output87, -1)
     output91 = builder.squeeze(output89, 0)
     output93 = builder.matmul(output1, arg13)
-    output95 = builder.reshape(output93, (1, 12, 32, 100))
+    output95 = builder.reshape(output93, (1, seq_len, num_of_heads, head_dim))
     output97 = builder.transpose(output95, -3, -2)
     output99 = builder.transpose(output97, -2, -1)
     output101 = builder.squeeze(output99, 0)
@@ -110,7 +131,7 @@ def test_shape_calc_llama_attention(
     output105 = builder.matmul(output91, output103)
     output107 = builder.unsqueeze(output105, 0)
     output109 = builder.transpose(output107, -3, -2)
-    output111 = builder.reshape(output109, (12, 3200))
+    output111 = builder.reshape(output109, (seq_len, hidden_stage_size))
     output113 = builder.matmul(output111, arg14)
     output115 = builder.unsqueeze(output113, 0)
 

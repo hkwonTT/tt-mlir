@@ -22,6 +22,45 @@ Operand = Union[Value, OpView, Operation]
 
 # Convenience alias for shape
 Shape = Union[List[int], Tuple[int, ...]]
+import re
+
+
+def sanitize_filename(
+    filename: str, replacement: str = "_", max_length: int = 255
+) -> str:
+    """
+    Sanitize the given string to make it safe for use as a Linux filename.
+
+    Args:
+        filename (str): The original filename string.
+        replacement (str): The string to replace unsafe characters with. Default is "_".
+        max_length (int): Maximum length of the filename. Default is 255.
+
+    Returns:
+        str: A sanitized filename.
+    """
+    # 1. Remove or replace illegal characters
+    # / and \0 are strictly forbidden
+    sanitized = filename.replace("/", replacement).replace("\0", replacement)
+
+    # 2. Remove other potentially problematic characters (strict mode)
+    sanitized = re.sub(r"[^A-Za-z0-9._-]", replacement, sanitized)
+
+    # 3. Prevent filename from starting with a dot (which would make it hidden)
+    if sanitized.startswith("."):
+        sanitized = replacement + sanitized
+
+    # 4. Collapse multiple replacement characters into one
+    sanitized = re.sub(f"{re.escape(replacement)}+", replacement, sanitized)
+
+    # 5. Truncate if too long
+    sanitized = sanitized[:max_length]
+
+    # 6. Avoid empty filename
+    if not sanitized:
+        sanitized = "file"
+
+    return sanitized
 
 
 def get_loc_of_extra_file_callee(id: int = 0) -> Location:
@@ -56,6 +95,8 @@ def get_loc_of_extra_file_callee(id: int = 0) -> Location:
 
     while len(stack) > 0 and stack[0].filename == caller_filename:
         stack = stack[1:]
+    if "helper" in stack[0].filename:
+        stack = stack[1:]
 
     assert (
         len(stack) > 0
@@ -64,7 +105,9 @@ def get_loc_of_extra_file_callee(id: int = 0) -> Location:
     # FIXME: this should be a `Location.file`, but for some reason it causes
     # strange decomposition inheritance behaviour that breaks using this as
     # a key into the golden map
-    return Location.name(f"{stack[0].filename}:{str(stack[0].lineno)}:id({str(id)})")
+    loc_str = f"{stack[0].filename}:{str(stack[0].lineno)}:id({str(id)})"
+    loc_str = sanitize_filename(loc_str)
+    return Location.name(loc_str)
 
 
 @dataclass(frozen=True)
@@ -125,7 +168,7 @@ class TTIRBuilder:
         self._ctx = ctx
         self._loc = location
 
-        self._seed = 0
+        self._seed = 9999
         # Dictionary to store Golden for each Operand we encounter in MLIR
         # graph.
         self._goldens: Dict[Operand, Golden] = {}
@@ -490,6 +533,7 @@ class TTIRBuilder:
         golden_kwargs: dict = {},
         ttir_kwargs: dict = {},
         use_zeros: bool = False,
+        debug: bool = False,
     ) -> Any:
         """
         Provides a general interface for proxy-ing OPs and creating them.
@@ -561,6 +605,7 @@ class TTIRBuilder:
             )
             # Use the golden output to determine proper output shape and type unless otherwise specified.
             output_shape = golden.tensor.shape if not output_shape else output_shape
+            print(f"# {list(output_shape)}")
             if not output_type and inputs:
                 output_type = self.get_type_from_torch_dtype(
                     self._get_golden_tensor(inputs[0]).dtype
@@ -574,6 +619,8 @@ class TTIRBuilder:
                 output = self.empty(output_shape, output_type)
             id = self.get_next_global_id()
             loc = get_loc_of_extra_file_callee(id=id)
+            if debug:
+                print(loc)
             # Account for cases in which ttir_arg organization is not needed:
             if (
                 not isinstance(
@@ -1328,6 +1375,7 @@ class TTIRBuilder:
 
     def reshape(self, in0: Operand, shape: Shape) -> OpView:
         kwargs = {"shape": shape}
+        # print(f"Reshaping {self._get_golden_tensor(in0).shape} to {shape}")
         return self.op_proxy(
             torch.reshape,
             ttir.ReshapeOp,
@@ -1537,6 +1585,20 @@ class TTIRBuilder:
         self, in0: Operand, in1: Operand, bias: Optional[Operand] = None
     ) -> OpView:
         inputs = [in0, in1]
+        debug = False
+        # minimum_tile = 128
+        # in0_tensor = self._get_golden_tensor(in0)
+        # in1_tensor = self._get_golden_tensor(in1)
+        # in0_shape = in0_tensor.shape
+        # in1_shape = in1_tensor.shape
+        # print(f"[{in0_shape[-2]}, {in0_shape[-1]}] x [{in1_shape[-2]}, {in1_shape[-1]}]")
+        # if in0_shape[-1] % minimum_tile != 0 or in1_shape[-2] % minimum_tile != 0:
+        #     print(f"Sharding Error on in0")
+        #     debug = True
+        # if in1_shape[-1] % minimum_tile != 0 or in0_shape[-2] % minimum_tile != 0:
+        #     print(f"Sharding Error on in1")
+        #     debug = True
+
         if bias:
             inputs.append(bias)
         return self.op_proxy(
@@ -1544,6 +1606,7 @@ class TTIRBuilder:
             ttir.MatmulOp,
             inputs,
             organize_ttir_args=lambda i, o, shape: (self._get_type(o), i[0], i[1], o),
+            debug=debug,
         )
 
     def permute(
@@ -1749,6 +1812,15 @@ class TTIRBuilder:
         scatter_dim: int,
         cluster_axis: int,
     ) -> OpView:
+        debug = False
+        minimum_tile = 64
+        in0_tensor = self._get_golden_tensor(input)
+        in0_shape = in0_tensor.shape
+        print(f"Reduce Scatter with [{in0_shape[-2]}, {in0_shape[-1]}]")
+        if in0_shape[-1] % minimum_tile != 0 or in0_shape[-2] % minimum_tile != 0:
+            print(f"reduce scatter Error on in0")
+            debug = True
+
         kwargs = {
             "reduce_type": Attribute.parse(reduce_type),
             "scatter_dim": scatter_dim,

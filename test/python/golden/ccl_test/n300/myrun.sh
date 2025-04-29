@@ -1,10 +1,21 @@
 #!/bin/bash
 
 function print_execution() {
-    cat runlog.txt | grep --color=always -E 'Executing operation' | grep --color=always -vE '(deallocate)|(to_layout)|(from_device)|(to_device)|(get_device)' | sed -E "s/\x1B\[[0-9;]*[a-zA-Z]//g" | sed -E 's/[[:space:]]*RuntimeTTNN[[:space:]]*\|[[:space:]]*DEBUG[[:space:]]*\|[[:space:]]*Executing operation:[[:space:]]*//g' | sed -E 's/("ttnn\.[a-zA-Z0-9_-]+")/\x1b[33m\1\x1b[0m/g'
+    T_LOG_FILE=$1
+    cat ${T_LOG_FILE} | grep --color=always -E 'Executing operation' | grep --color=always -vE '(deallocate)|(to_layout)|(from_device)|(to_device)|(get_device)' | sed -E "s/\x1B\[[0-9;]*[a-zA-Z]//g" | sed -E 's/[[:space:]]*RuntimeTTNN[[:space:]]*\|[[:space:]]*DEBUG[[:space:]]*\|[[:space:]]*Executing operation:[[:space:]]*//g' | sed -E 's/("ttnn\.[a-zA-Z0-9_-]+")/\x1b[33m\1\x1b[0m/g'
 }
+function print_program_level_golden_comparison_result() {
+    T_LOG_FILE=$1
+    cat ${T_LOG_FILE} | grep --color=always -iE '(program[- ]level)|(test case)|(prgram-level)'
+
+}
+
+T_LOG_FILE=runlog.txt
+T_LOG_EXTRACTED_FILE=runlog_extracted.txt
 rm -rf ttnn && \
 python test_ttir_llama_tile.py && \
-ttrt run ttnn/test_llama_attention_multidevice.ttnn &>  >(tee runlog.txt) && \
-cat runlog.txt | grep --color=always -iE '(program[- ]level)|(test case)'
-# print_execution
+{
+    ttrt run --save-artifacts --save-golden-tensors ttnn/test_llama_attention_multidevice.ttnn &>  >(tee ${T_LOG_FILE});\
+    print_program_level_golden_comparison_result ${T_LOG_FILE}
+    print_execution ${T_LOG_FILE} > ${T_LOG_EXTRACTED_FILE};
+}
