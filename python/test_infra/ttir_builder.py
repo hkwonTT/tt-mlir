@@ -286,12 +286,15 @@ class TTIRBuilder:
         for index, tensor in enumerate(inputs):
             input_key = f"input_{index}"
             if input_key in self.id_golden_map:
+                print(
+                    f"tensor.shape: {tensor.shape}, golden.shape: {self.id_golden_map[input_key].tensor.shape}"
+                )
                 assert self.id_golden_map[input_key].tensor.shape == tensor.shape
                 assert self.id_golden_map[input_key].tensor.dtype == tensor.dtype
             self.id_golden_map[input_key] = Golden(tensor)
 
         if outputs is not None:
-            self.golden_check_level = GoldenCheckLevel.GRAPH_LEVEL
+            # self.golden_check_level = GoldenCheckLevel.GRAPH_LEVEL
             for index, tensor in enumerate(outputs):
                 output_key = f"output_{index}"
                 self.id_golden_map[output_key] = Golden(tensor)
@@ -1586,18 +1589,21 @@ class TTIRBuilder:
     ) -> OpView:
         inputs = [in0, in1]
         debug = False
-        # minimum_tile = 128
+        # minimum_tile = 64
         # in0_tensor = self._get_golden_tensor(in0)
         # in1_tensor = self._get_golden_tensor(in1)
         # in0_shape = in0_tensor.shape
         # in1_shape = in1_tensor.shape
+
         # print(f"[{in0_shape[-2]}, {in0_shape[-1]}] x [{in1_shape[-2]}, {in1_shape[-1]}]")
-        # if in0_shape[-1] % minimum_tile != 0 or in1_shape[-2] % minimum_tile != 0:
-        #     print(f"Sharding Error on in0")
-        #     debug = True
+        # # if in0_shape[-1] % minimum_tile != 0 or in1_shape[-2] % minimum_tile != 0:
+        # #     print(f"Sharding Error on in0")
+        # #     debug = True
         # if in1_shape[-1] % minimum_tile != 0 or in0_shape[-2] % minimum_tile != 0:
-        #     print(f"Sharding Error on in1")
+        #     print(f"Possible reduce_scatter error with tile size!!")
         #     debug = True
+        # if len(in0_shape) != 4:
+        #     print("Possible reduce_scatter error with rank!! ")
 
         if bias:
             inputs.append(bias)
@@ -1812,14 +1818,14 @@ class TTIRBuilder:
         scatter_dim: int,
         cluster_axis: int,
     ) -> OpView:
-        debug = False
-        minimum_tile = 64
-        in0_tensor = self._get_golden_tensor(input)
-        in0_shape = in0_tensor.shape
-        print(f"Reduce Scatter with [{in0_shape[-2]}, {in0_shape[-1]}]")
-        if in0_shape[-1] % minimum_tile != 0 or in0_shape[-2] % minimum_tile != 0:
-            print(f"reduce scatter Error on in0")
-            debug = True
+        # debug = False
+        # minimum_tile = 64
+        # in0_tensor = self._get_golden_tensor(input)
+        # in0_shape = in0_tensor.shape
+        # print(f"Reduce Scatter with [{in0_shape[-2]}, {in0_shape[-1]}]")
+        # if in0_shape[-1] % minimum_tile != 0 or in0_shape[-2] % minimum_tile != 0:
+        #     print(f"reduce scatter Error on in0")
+        #     debug = True
 
         kwargs = {
             "reduce_type": Attribute.parse(reduce_type),
