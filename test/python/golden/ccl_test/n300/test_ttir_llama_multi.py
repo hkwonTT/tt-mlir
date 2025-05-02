@@ -55,16 +55,10 @@ def test_llama_attention(
         [v for k, v in locals().items() if k != "builder"], builder=builder
     )
     output1 = builder.squeeze(arg0, 0)  # [128, 4096]
+
     output3 = builder.matmul(output1, arg11)  # [128, 4096]
     output5 = builder.reshape(output3, (1, 128, 32, 128))  # [1, 128, 32, 128]
     output7 = builder.transpose(output5, -3, -2)  # [1, 32, 128, 128]
-    output9 = builder.unsqueeze(arg2, 1)  # [1, 1, 128]
-    output11 = builder.matmul(arg3, output9)  # [1, 64, 128]
-    output13 = builder.transpose(output11, -2, -1)  # [1, 128, 64]
-    output15 = builder.concat([output13, output13], -1)  # [1, 128, 128]
-    output17 = builder.cos(output15)  # [1, 128, 128]
-    output19 = builder.unsqueeze(output17, 1)  # [1, 1, 128, 128]
-    output21 = builder.multiply(output7, output19)  # [1, 32, 128, 128]
     output23 = builder.transpose(output7, -2, -1)  # [1, 32, 128, 128]
     output25 = builder.matmul(arg4, output23)  # [1, 32, 64, 128]
     output27 = builder.transpose(output25, -2, -1)  # [1, 32, 128, 64]
@@ -73,11 +67,20 @@ def test_llama_attention(
     output33 = builder.matmul(arg6, output31)  # [1, 32, 64, 128]
     output35 = builder.transpose(output33, -2, -1)  # [1, 32, 128, 64]
     output37 = builder.concat([output29, output35], -1)  # [1, 32, 128, 128]
-    output39 = builder.sin(output15)  # [1, 128, 128]
-    output41 = builder.unsqueeze(output39, 1)  # [1, 1, 128, 128]
     output43 = builder.multiply(output37, output41)  # [1, 32, 128, 128]
     output45 = builder.add(output21, output43)  # [1, 32, 128, 128]
     output47 = builder.squeeze(output45, 0)  # [32, 128, 128]
+
+    output9 = builder.unsqueeze(arg2, 1)  # [1, 1, 128]
+    output11 = builder.matmul(arg3, output9)  # [1, 64, 128]
+    output13 = builder.transpose(output11, -2, -1)  # [1, 128, 64]
+    output15 = builder.concat([output13, output13], -1)  # [1, 128, 128]
+    output17 = builder.cos(output15)  # [1, 128, 128]
+    output19 = builder.unsqueeze(output17, 1)  # [1, 1, 128, 128]
+    output21 = builder.multiply(output7, output19)  # [1, 32, 128, 128]
+    output39 = builder.sin(output15)  # [1, 128, 128]
+    output41 = builder.unsqueeze(output39, 1)  # [1, 1, 128, 128]
+
     output49 = builder.matmul(output1, arg12)  # [128, 4096]
     output51 = builder.reshape(output49, (1, 128, 32, 128))  # [1, 128, 32, 128]
     output53 = builder.transpose(output51, -3, -2)  # [1, 32, 128, 128]
@@ -93,6 +96,7 @@ def test_llama_attention(
     output73 = builder.multiply(output71, output41)  # [1, 32, 128, 128]
     output75 = builder.add(output55, output73)  # [1, 32, 128, 128]
     output77 = builder.squeeze(output75, 0)  # [32, 128, 128]
+
     output79 = builder.transpose(output77, -2, -1)  # [32, 128, 128]
     output81 = builder.matmul(output47, output79)  # [32, 128, 128]
     output83 = builder.unsqueeze(output81, 0)  # [1, 32, 128, 128]
@@ -113,6 +117,180 @@ def test_llama_attention(
     output113 = builder.matmul(output111, arg14)  # [128, 4096]
     output115 = builder.unsqueeze(output113, 0)  # [1, 128, 4096]
 
+    save_all_output_goldens([output115], builder=builder)
+    return output115
+
+
+@compile_to_flatbuffer(
+    [
+        (1, 128, 4096),  # arg0
+        (1, 32, 64, 128),  # arg4
+        (1, 1),  # arg5
+        (1, 32, 64, 128),  # arg6
+        (4096, 4096),  # arg11
+        (1, 32, 128, 128),  # output21
+        (1, 1, 128, 128),  # output41
+    ],
+    targets=["ttnn"],
+    module_dump=True,
+)
+def test_llama_attention_query(
+    arg0: Operand,
+    arg4: Operand,
+    arg5: Operand,
+    arg6: Operand,
+    arg11: Operand,
+    output21: Operand,
+    output41: Operand,
+    builder: TTIRBuilder,
+):
+    save_all_input_goldens(
+        [v for k, v in locals().items() if k != "builder"], builder=builder
+    )
+    output1 = builder.squeeze(arg0, 0)  # [128, 4096]
+
+    output3 = builder.matmul(output1, arg11)  # [128, 4096]
+    output5 = builder.reshape(output3, (1, 128, 32, 128))  # [1, 128, 32, 128]
+    output7 = builder.transpose(output5, -3, -2)  # [1, 32, 128, 128]
+    output23 = builder.transpose(output7, -2, -1)  # [1, 32, 128, 128]
+    output25 = builder.matmul(arg4, output23)  # [1, 32, 64, 128]
+    output27 = builder.transpose(output25, -2, -1)  # [1, 32, 128, 64]
+    output29 = builder.multiply(output27, arg5)  # [1, 32, 128, 64]
+    output31 = builder.transpose(output7, -2, -1)  # [1, 32, 128, 128]
+    output33 = builder.matmul(arg6, output31)  # [1, 32, 64, 128]
+    output35 = builder.transpose(output33, -2, -1)  # [1, 32, 128, 64]
+    output37 = builder.concat([output29, output35], -1)  # [1, 32, 128, 128]
+    output43 = builder.multiply(output37, output41)  # [1, 32, 128, 128]
+    output45 = builder.add(output21, output43)  # [1, 32, 128, 128]
+    output47 = builder.squeeze(output45, 0)  # [32, 128, 128]
+    save_all_output_goldens([output47], builder=builder)
+    return output47
+
+
+@compile_to_flatbuffer(
+    [
+        (1, 128, 4096),  # arg0
+        (1, 32, 64, 128),  # arg7
+        (1, 1),  # arg8
+        (1, 32, 64, 128),  # arg9
+        (4096, 4096),  # arg12
+        (1, 1, 128, 128),  # output19
+        (1, 1, 128, 128),  # output41
+    ],
+    targets=["ttnn"],
+    module_dump=True,
+)
+def test_llama_attention_key(
+    arg0: Operand,
+    arg7: Operand,
+    arg8: Operand,
+    arg9: Operand,
+    arg12: Operand,
+    output19: Operand,
+    output41: Operand,
+    builder: TTIRBuilder,
+):
+    save_all_input_goldens(
+        [v for k, v in locals().items() if k != "builder"], builder=builder
+    )
+    output1 = builder.squeeze(arg0, 0)  # [128, 4096]
+
+    output49 = builder.matmul(output1, arg12)  # [128, 4096]
+    output51 = builder.reshape(output49, (1, 128, 32, 128))  # [1, 128, 32, 128]
+    output53 = builder.transpose(output51, -3, -2)  # [1, 32, 128, 128]
+    output55 = builder.multiply(output53, output19)  # [1, 32, 128, 128]
+    output57 = builder.transpose(output53, -2, -1)  # [1, 32, 128, 128]
+    output59 = builder.matmul(arg7, output57)  # [1, 32, 64, 128]
+    output61 = builder.transpose(output59, -2, -1)  # [1, 32, 128, 64]
+    output63 = builder.multiply(output61, arg8)  # [1, 32, 128, 64]
+    output65 = builder.transpose(output53, -2, -1)  # [1, 32, 128, 128]
+    output67 = builder.matmul(arg9, output65)  # [1, 32, 64, 128]
+    output69 = builder.transpose(output67, -2, -1)  # [1, 32, 128, 64]
+    output71 = builder.concat([output63, output69], -1)  # [1, 32, 128, 128]
+    output73 = builder.multiply(output71, output41)  # [1, 32, 128, 128]
+    output75 = builder.add(output55, output73)  # [1, 32, 128, 128]
+    output77 = builder.squeeze(output75, 0)  # [32, 128, 128]
+    save_all_output_goldens([output77], builder=builder)
+    return output77
+
+
+@compile_to_flatbuffer(
+    [
+        (1, 128),  # arg2
+        (1, 64, 1),  # arg3
+        (1, 32, 128, 128),  # output7
+    ],
+    targets=["ttnn"],
+    module_dump=True,
+)
+def test_llama_attention_RoPE(
+    arg2: Operand,
+    arg3: Operand,
+    output7: Operand,
+    builder: TTIRBuilder,
+):
+    save_all_input_goldens(
+        [v for k, v in locals().items() if k != "builder"], builder=builder
+    )
+    output9 = builder.unsqueeze(arg2, 1)  # [1, 1, 128]
+    output11 = builder.matmul(arg3, output9)  # [1, 64, 128]
+    output13 = builder.transpose(output11, -2, -1)  # [1, 128, 64]
+    output15 = builder.concat([output13, output13], -1)  # [1, 128, 128]
+    output17 = builder.cos(output15)  # [1, 128, 128]
+    output19 = builder.unsqueeze(output17, 1)  # [1, 1, 128, 128]
+    output21 = builder.multiply(output7, output19)  # [1, 32, 128, 128]
+    output39 = builder.sin(output15)  # [1, 128, 128]
+    output41 = builder.unsqueeze(output39, 1)  # [1, 1, 128, 128]
+    save_all_output_goldens([output41], builder=builder)
+    return output41
+
+
+@compile_to_flatbuffer(
+    [
+        (1, 128, 4096),  # arg0
+        (1, 1, 128, 128),  # arg1
+        (1, 1),  # arg10
+        (4096, 4096),  # arg13
+        (4096, 4096),  # arg14
+        (32, 128, 128),  # output47
+        (32, 128, 128),  # output77
+    ],
+    targets=["ttnn"],
+    module_dump=True,
+)
+def test_llama_attention_value_scaled_dot(
+    arg0: Operand,
+    arg1: Operand,
+    arg10: Operand,
+    arg13: Operand,
+    arg14: Operand,
+    output47: Operand,
+    output77: Operand,
+    builder: TTIRBuilder,
+):
+    save_all_input_goldens(
+        [v for k, v in locals().items() if k != "builder"], builder=builder
+    )
+    output1 = builder.squeeze(arg0, 0)  # [128, 4096]
+    output79 = builder.transpose(output77, -2, -1)  # [32, 128, 128]
+    output81 = builder.matmul(output47, output79)  # [32, 128, 128]
+    output83 = builder.unsqueeze(output81, 0)  # [1, 32, 128, 128]
+    output85 = builder.multiply(output83, arg10)  # [1, 32, 128, 128]
+    output87 = builder.add(output85, arg1)  # [1, 32, 128, 128]
+    output89 = builder.softmax(output87, -1)  # [1, 32, 128, 128]
+    output91 = builder.squeeze(output89, 0)  # [32, 128, 128]
+    output93 = builder.matmul(output1, arg13)  # [128, 4096]
+    output95 = builder.reshape(output93, (1, 128, 32, 128))  # [1, 128, 32, 128]
+    output97 = builder.transpose(output95, -3, -2)  # [1, 32, 128, 128]
+    output99 = builder.transpose(output97, -2, -1)  # [1, 32, 128, 128]
+    output101 = builder.squeeze(output99, 0)  # [32, 128, 128]
+    output103 = builder.transpose(output101, -2, -1)  # [32, 128, 128]
+    output105 = builder.matmul(output91, output103)  # [32, 128, 128]
+    output107 = builder.unsqueeze(output105, 0)  # [1, 32, 128, 128]
+    output109 = builder.transpose(output107, -3, -2)  # [1, 128, 32, 128]
+    output111 = builder.reshape(output109, (128, 4096))  # [128, 4096]
+    output113 = builder.matmul(output111, arg14)  # [128, 4096]
+    output115 = builder.unsqueeze(output113, 0)  # [1, 128, 4096]
     save_all_output_goldens([output115], builder=builder)
     return output115
 
@@ -309,6 +487,10 @@ if __name__ == "__main__":
         inspect.getmodule(inspect.currentframe()), inspect.isfunction
     )
 
-    for function_name, func in test_functions:
-        if function_name.startswith("test_"):
-            func()
+    # for function_name, func in test_functions:
+    #     if function_name.startswith("test_"):
+    #         func()
+    test_llama_attention_query()
+    test_llama_attention_key()
+    test_llama_attention_RoPE()
+    test_llama_attention_value_scaled_dot()

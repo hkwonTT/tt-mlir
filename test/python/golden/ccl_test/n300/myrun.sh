@@ -13,9 +13,9 @@ function print_program_level_golden_comparison_result() {
 T_LOG_FILE=runlog.txt
 T_LOG_EXTRACTED_FILE=runlog_extracted.txt
 rm -rf ttnn && \
-python test_ttir_llama_tile.py && \
+python test_ttir_llama_multi.py && \
 {
-    ttrt run --save-artifacts --save-golden-tensors ttnn/test_llama_attention_multidevice.ttnn &>  >(tee ${T_LOG_FILE});\
+    ttrt run --save-artifacts --save-golden-tensors ttnn/test_llama_attention.ttnn &>  >(tee ${T_LOG_FILE});\
     print_program_level_golden_comparison_result ${T_LOG_FILE}
     print_execution ${T_LOG_FILE} > ${T_LOG_EXTRACTED_FILE};
 }
