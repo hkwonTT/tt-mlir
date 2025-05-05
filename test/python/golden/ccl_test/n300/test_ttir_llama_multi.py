@@ -27,8 +27,8 @@ from helpers import *
         (1, 1),  # arg10
         (4096, 4096),  # arg11
         (4096, 4096),  # arg12
-        # (4096, 4096),  # arg13
-        # (4096, 4096),  # arg14
+        (4096, 4096),  # arg13
+        (4096, 4096),  # arg14
     ],
     targets=["ttnn"],
     module_dump=True,
@@ -47,8 +47,8 @@ def test_llama_attention(
     arg10: Operand,
     arg11: Operand,
     arg12: Operand,
-    # arg13: Operand,
-    # arg14: Operand,
+    arg13: Operand,
+    arg14: Operand,
     builder: TTIRBuilder,
 ):
     save_all_input_goldens(
@@ -99,25 +99,25 @@ def test_llama_attention(
     output79 = builder.transpose(output77, -2, -1)  # [32, 128, 128]
     output81 = builder.matmul(output47, output79)  # [32, 128, 128]
     output83 = builder.unsqueeze(output81, 0)  # [1, 32, 128, 128]
-    # output85 = builder.multiply(output83, arg10)  # [1, 32, 128, 128]
-    # output87 = builder.add(output85, arg1)  # [1, 32, 128, 128]
-    # output89 = builder.softmax(output87, -1)  # [1, 32, 128, 128]
-    # output91 = builder.squeeze(output89, 0)  # [32, 128, 128]
-    # output93 = builder.matmul(output1, arg13)  # [128, 4096]
-    # output95 = builder.reshape(output93, (1, 128, 32, 128))  # [1, 128, 32, 128]
-    # output97 = builder.transpose(output95, -3, -2)  # [1, 32, 128, 128]
-    # output99 = builder.transpose(output97, -2, -1)  # [1, 32, 128, 128]
-    # output101 = builder.squeeze(output99, 0)  # [32, 128, 128]
-    # output103 = builder.transpose(output101, -2, -1)  # [32, 128, 128]
-    # output105 = builder.matmul(output91, output103)  # [32, 128, 128]
-    # output107 = builder.unsqueeze(output105, 0)  # [1, 32, 128, 128]
-    # output109 = builder.transpose(output107, -3, -2)  # [1, 128, 32, 128]
-    # output111 = builder.reshape(output109, (128, 4096))  # [128, 4096]
-    # output113 = builder.matmul(output111, arg14)  # [128, 4096]
-    # output115 = builder.unsqueeze(output113, 0)  # [1, 128, 4096]
+    output85 = builder.multiply(output83, arg10)  # [1, 32, 128, 128]
+    output87 = builder.add(output85, arg1)  # [1, 32, 128, 128]
+    output89 = builder.softmax(output87, -1)  # [1, 32, 128, 128]
+    output91 = builder.squeeze(output89, 0)  # [32, 128, 128]
+    output93 = builder.matmul(output1, arg13)  # [128, 4096]
+    output95 = builder.reshape(output93, (1, 128, 32, 128))  # [1, 128, 32, 128]
+    output97 = builder.transpose(output95, -3, -2)  # [1, 32, 128, 128]
+    output99 = builder.transpose(output97, -2, -1)  # [1, 32, 128, 128]
+    output101 = builder.squeeze(output99, 0)  # [32, 128, 128]
+    output103 = builder.transpose(output101, -2, -1)  # [32, 128, 128]
+    output105 = builder.matmul(output91, output103)  # [32, 128, 128]
+    output107 = builder.unsqueeze(output105, 0)  # [1, 32, 128, 128]
+    output109 = builder.transpose(output107, -3, -2)  # [1, 128, 32, 128]
+    output111 = builder.reshape(output109, (128, 4096))  # [128, 4096]
+    output113 = builder.matmul(output111, arg14)  # [128, 4096]
+    output115 = builder.unsqueeze(output113, 0)  # [1, 128, 4096]
 
-    save_all_output_goldens([output83], builder=builder)
-    return output83
+    save_all_output_goldens([output115], builder=builder)
+    return output115
 
 
 @compile_to_flatbuffer(
@@ -135,8 +135,8 @@ def test_llama_attention(
         (1, 1),  # arg10
         (4096, 4096),  # arg11
         (4096, 4096),  # arg12
-        # (4096, 4096),  # arg13
-        # (4096, 4096),  # arg14
+        (4096, 4096),  # arg13
+        (4096, 4096),  # arg14
     ],
     targets=["ttnn"],
     mesh_shape=[1, 2],
@@ -156,8 +156,8 @@ def test_llama_attention_multidevice(
     arg10: Operand,
     arg11: Operand,
     arg12: Operand,
-    # arg13: Operand,
-    # arg14: Operand,
+    arg13: Operand,
+    arg14: Operand,
     builder: TTIRBuilder,
 ):
     set_graph_goldens(builder)
@@ -255,110 +255,45 @@ def test_llama_attention_multidevice(
     output75 = builder.add(output55, output73)  # [1, 32, 128, 64]
     output77 = builder.squeeze(output75, 0)  # [32, 128, 64]
     output79 = builder.transpose(output77, -2, -1)  # [32, 64, 128]
-    # testing start
-    def single(output47, output79, builder):
-        output47 = shard_to_full_device(output47, builder, 2)
-        output79 = shard_to_full_device(output79, builder, 1)
-        output81 = builder.matmul(output47, output79)  # [32, 128, 128]
-        output83 = builder.unsqueeze(output81, 0)  # [1, 32, 128, 128]
-        return output83  # golden matched
-
-    def inner_product(output47, output79, builder):
-        output81 = builder.matmul(output47, output79)  # [32, 128, 128]
-        output83 = builder.unsqueeze(output81, 0)  # [1, 32, 128, 128]
-        output83 = builder.reduce_scatter(
-            output83, reduce_type="#tt.reduce_type<sum>", scatter_dim=3, cluster_axis=1
-        )  # [1, 32, 128, 64]
-        output83 = shard_to_full_device(output83, builder, 3)
-        return output83  # mismatch actual_pcc=0.6154692030250296
-
-    def inner_product2(output47, output79, builder):
-        output81 = builder.matmul(output47, output79)  # [32, 128, 128]
-        output83 = builder.all_reduce(
-            output81, reduce_type="#tt.reduce_type<sum>", cluster_axis=1
-        )  # [1, 32, 128, 64]
-        output83 = shard_to_full_replicate(output83, builder)
-        output83 = builder.unsqueeze(output83, 0)  # [1, 32, 128, 128]
-        return output83  # mismatch actual_pcc=0.6154692030250296
-
-    def inner_product_test(output47, output79, builder):
-        output81 = builder.matmul(output47, output79)  # [32, 128, 128]
-        output83 = shard_to_full_device(output81, builder, 2)
-        output83 = builder.unsqueeze(output83, 0)  # [1, 32, 128, 128]
-        return output83  # mismatch actual_pcc=0.6154692030250296
-
-    def data_parallel(output47, output79, builder):
-        output47 = shard_to_full_device(output47, builder, 2)
-        output79 = shard_to_full_device(output79, builder, 1)
-        output47 = full_to_shard_device(output47, builder, 0)
-        output79 = full_to_shard_device(output79, builder, 0)
-        output81 = builder.matmul(output47, output79)  # [32, 128, 128]
-        output83 = builder.unsqueeze(output81, 0)  # [1, 32, 128, 128]
-        output83 = builder.all_gather(output83, all_gather_dim=1, cluster_axis=1)
-        output83 = shard_to_full_replicate(output83, builder)
-        return output83  # golden matched
-
-    def row_sharding(output47, output79, builder):
-        output47 = shard_to_full_device(output47, builder, 2)
-        output79 = shard_to_full_device(output79, builder, 1)
-        output47 = full_to_shard_device(output47, builder, 1)  # [32, 64, 256]
-        output79 = full_to_shard_replicate(output79, builder)  # [32, 256, 128]
-        output81 = builder.matmul(output47, output79)  # [32, 64, 128]
-        output83 = builder.unsqueeze(output81, 0)  # [1, 32, 64, 128]
-        output83 = builder.all_gather(output83, all_gather_dim=2, cluster_axis=1)
-        output83 = shard_to_full_replicate(output83, builder)
-        return output83  # golden matched pcc=0.9999834048798768
-
-    def col_sharding(output47, output79, builder):
-        output47 = shard_to_full_device(output47, builder, 2)
-        output79 = shard_to_full_device(output79, builder, 1)
-        output47 = full_to_shard_replicate(output47, builder)
-        output79 = full_to_shard_device(output79, builder, 2)  # [32, 256, 64]
-        output81 = builder.matmul(output47, output79)  # [32, 128, 64]
-        output83 = builder.unsqueeze(output81, 0)  # [1, 32, 128, 64]
-        output83 = builder.all_gather(output83, all_gather_dim=3, cluster_axis=1)
-        output83 = shard_to_full_replicate(output83, builder)
-        return output83  # golden matched pcc=0.9999834048798768
-
-    output83 = inner_product(output47, output79, builder)
-    # output83 = builder.reduce_scatter(
-    #     output83, reduce_type="#tt.reduce_type<sum>", scatter_dim=3, cluster_axis=1
-    # )  # [1, 32, 128, 64]
-    # testing end
-    # arg10 = full_to_shard_replicate(arg10, builder)  # [1, 1]
-    # output85 = builder.multiply(output83, arg10)  # [1, 32, 128, 64]
-    # arg1 = full_to_shard_device(arg1, builder, 3)  # [1, 1, 128, 64]
-    # output87 = builder.add(output85, arg1)  # [1, 32, 128, 64]
-    # output87 = shard_to_full_device(output87, builder, 3)
-    # output87 = full_to_shard_device(output87, builder, 2)
-    # output89 = builder.softmax(output87, -1)  # [1, 32, 64, 128]
-    # output89 = shard_to_full_device(output89, builder, 2)
-    # output89 = full_to_shard_device(output89, builder, 3)
-    # output91 = builder.squeeze(output89, 0)  # [32, 128, 64]
-    # arg13 = full_to_shard_device(arg13, builder, 0)  # [2048, 4096]
-    # output93 = builder.matmul(output1, arg13)  # [128, 4096]
-    # output93 = builder.all_reduce(
-    #     output93, reduce_type="#tt.reduce_type<sum>", cluster_axis=1
-    # )  # [128, 4096]
-    # output95 = builder.reshape(output93, (1, 128, 32, 128))  # [1, 128, 32, 128]
-    # output95 = shard_to_full_replicate(output95, builder)  # [1, 128, 32, 128]
-    # output95 = full_to_shard_device(output95, builder, 1)  # [1, 64, 32, 128]
-    # output97 = builder.transpose(output95, -3, -2)  # [1, 32, 64, 128]
-    # output99 = builder.transpose(output97, -2, -1)  # [1, 32, 128, 64]
-    # output101 = builder.squeeze(output99, 0)  # [32, 128, 64]
-    # output103 = builder.transpose(output101, -2, -1)  # [32, 64, 128]
-    # output105 = builder.matmul(output91, output103)  # [32, 128, 128]
-    # output105 = builder.all_reduce(
-    #     output105, reduce_type="#tt.reduce_type<sum>", cluster_axis=1
-    # )  # [32, 128, 128]
-    # output107 = builder.unsqueeze(output105, 0)  # [1, 32, 128, 128]
-    # output109 = builder.transpose(output107, -3, -2)  # [1, 128, 32, 128]
-    # output111 = builder.reshape(output109, (128, 4096))  # [128, 4096]
-    # arg14 = full_to_shard_device(arg14, builder, 1)  # [4096, 2048]
-    # output113 = builder.matmul(output111, arg14)  # [128, 2048]
-    # output115 = builder.unsqueeze(output113, 0)  # [1, 128, 2048]
-    # output115 = shard_to_full_device(output115, builder, dim=2)  # [1, 128, 4096]
-    return output83
+    output81 = builder.matmul(output47, output79)  # [32, 128, 128]
+    output83 = builder.unsqueeze(output81, 0)  # [1, 32, 128, 128]
+    output83 = builder.reduce_scatter(
+        output83, reduce_type="#tt.reduce_type<sum>", scatter_dim=3, cluster_axis=1
+    )  # [1, 32, 128, 64]
+    arg10 = full_to_shard_replicate(arg10, builder)  # [1, 1]
+    output85 = builder.multiply(output83, arg10)  # [1, 32, 128, 64]
+    arg1 = full_to_shard_device(arg1, builder, 3)  # [1, 1, 128, 64]
+    output87 = builder.add(output85, arg1)  # [1, 32, 128, 64]
+    output87 = shard_to_full_device(output87, builder, 3)
+    output87 = full_to_shard_device(output87, builder, 2)
+    output89 = builder.softmax(output87, -1)  # [1, 32, 64, 128]
+    output89 = shard_to_full_device(output89, builder, 2)
+    output89 = full_to_shard_device(output89, builder, 3)
+    output91 = builder.squeeze(output89, 0)  # [32, 128, 64]
+    arg13 = full_to_shard_device(arg13, builder, 0)  # [2048, 4096]
+    output93 = builder.matmul(output1, arg13)  # [128, 4096]
+    output93 = builder.all_reduce(
+        output93, reduce_type="#tt.reduce_type<sum>", cluster_axis=1
+    )  # [128, 4096]
+    output95 = builder.reshape(output93, (1, 128, 32, 128))  # [1, 128, 32, 128]
+    output95 = shard_to_full_replicate(output95, builder)  # [1, 128, 32, 128]
+    output95 = full_to_shard_device(output95, builder, 1)  # [1, 64, 32, 128]
+    output97 = builder.transpose(output95, -3, -2)  # [1, 32, 64, 128]
+    output99 = builder.transpose(output97, -2, -1)  # [1, 32, 128, 64]
+    output101 = builder.squeeze(output99, 0)  # [32, 128, 64]
+    output103 = builder.transpose(output101, -2, -1)  # [32, 64, 128]
+    output105 = builder.matmul(output91, output103)  # [32, 128, 128]
+    output105 = builder.all_reduce(
+        output105, reduce_type="#tt.reduce_type<sum>", cluster_axis=1
+    )  # [32, 128, 128]
+    output107 = builder.unsqueeze(output105, 0)  # [1, 32, 128, 128]
+    output109 = builder.transpose(output107, -3, -2)  # [1, 128, 32, 128]
+    output111 = builder.reshape(output109, (128, 4096))  # [128, 4096]
+    arg14 = full_to_shard_device(arg14, builder, 1)  # [4096, 2048]
+    output113 = builder.matmul(output111, arg14)  # [128, 2048]
+    output115 = builder.unsqueeze(output113, 0)  # [1, 128, 2048]
+    output115 = shard_to_full_device(output115, builder, dim=2)  # [1, 128, 4096]
+    return output115
 
 
 @compile_to_flatbuffer(
