@@ -255,11 +255,15 @@ def test_llama_attention_multidevice(
     output75 = builder.add(output55, output73)  # [1, 32, 128, 64]
     output77 = builder.squeeze(output75, 0)  # [32, 128, 64]
     output79 = builder.transpose(output77, -2, -1)  # [32, 64, 128]
-    output81 = builder.matmul(output47, output79)  # [32, 128, 128]
-    output83 = builder.unsqueeze(output81, 0)  # [1, 32, 128, 128]
-    output83 = builder.reduce_scatter(
-        output83, reduce_type="#tt.reduce_type<sum>", scatter_dim=3, cluster_axis=1
-    )  # [1, 32, 128, 64]
+
+    output47 = shard_to_full_device(output47, builder, 2)
+    output79 = shard_to_full_device(output79, builder, 1)
+    output47 = full_to_shard_replicate(output47, builder)
+    output79 = full_to_shard_device(output79, builder, 2)
+    # Use weight sharding to avoid PCC drop
+    output81 = builder.matmul(output47, output79)  # [32, 128, 64]
+    output83 = builder.unsqueeze(output81, 0)  # [1, 32, 128, 64]
+
     arg10 = full_to_shard_replicate(arg10, builder)  # [1, 1]
     output85 = builder.multiply(output83, arg10)  # [1, 32, 128, 64]
     arg1 = full_to_shard_device(arg1, builder, 3)  # [1, 1, 128, 64]
