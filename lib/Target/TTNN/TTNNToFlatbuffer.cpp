@@ -698,6 +698,19 @@ createOp(FlatbufferObjectCache &cache, CollectivePermuteOp op) {
       cache.fbb->CreateVector<int64_t>(sourceTargetPairsVec));
 }
 
+::flatbuffers::Offset<::tt::target::ttnn::AllToAllOp>
+createOp(FlatbufferObjectCache &cache, AllToAllOp op) {
+  auto input = cache.at<::tt::target::ttnn::TensorRef>(
+      getOperandThroughDPSOps(op.getInput()));
+  auto output = cache.getOrCreate(op.getResult(), tensorValueToFlatbuffer,
+                                  kHostAllocatedSize);
+  auto device = getOperandThroughDPSOps(op.getDevice());
+  return ::tt::target::ttnn::CreateAllToAllOp(
+      *cache.fbb, input, output, cache.at<::tt::target::DeviceRef>(device),
+      op.getSplitDim(), op.getConcatDim(), op.getSplitCount(),
+      op.getClusterAxis());
+}
+
 ::flatbuffers::Offset<::tt::target::ttnn::MeshShardOp>
 createOp(FlatbufferObjectCache &cache, MeshShardOp op) {
   auto input = cache.at<::tt::target::ttnn::TensorRef>(
@@ -1995,6 +2008,10 @@ emitTTNNOperation(FlatbufferObjectCache &cache, Operation *op,
       collectivePermuteOp) {
     return createOperation(cache, createOp(cache, collectivePermuteOp),
                            debugString, locInfo);
+  }
+  if (auto allToAllOp = dyn_cast<AllToAllOp>(op); allToAllOp) {
+    return createOperation(cache, createOp(cache, allToAllOp), debugString,
+                           locInfo);
   }
   if (auto meshShardOp = dyn_cast<MeshShardOp>(op); meshShardOp) {
     return createOperation(cache, createOp(cache, meshShardOp), debugString,
