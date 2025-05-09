@@ -19,7 +19,25 @@ def pseudo_golden_all_gather(
     return output_tensor
 
 
-@pytest.mark.parametrize("shape", [(1, 32, 128, 128)])
+@pytest.mark.parametrize(
+    "shape",
+    [
+        (1, 32, 128, 128),
+        (1, 32, 120, 128),
+        (1, 32, 128, 120),
+        (1, 32, 120, 120),
+        (1, 32, 60, 128),
+        (1, 32, 128, 60),
+        (1, 32, 60, 60),
+        (1, 32, 30, 128),
+        (1, 32, 128, 30),
+        (1, 32, 30, 30),
+        (1, 32, 2, 128),
+        (1, 32, 128, 2),
+        (1, 32, 2, 2),
+        (1, 1, 1, 2),
+    ],
+)
 @pytest.mark.parametrize("mesh_shape", [(1, 2)])
 def test_all_gather(shape: Shape, mesh_shape: Tuple[int, int], request):
     def all_gather(in0: Operand, builder: TTIRBuilder):
