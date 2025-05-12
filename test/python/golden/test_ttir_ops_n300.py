@@ -215,7 +215,17 @@ def pseudo_golden_collective_permute(
     return result_tensor
 
 
-@pytest.mark.parametrize("shape", [(1, 1, 128, 1024)])
+@pytest.mark.parametrize(
+    "shape",
+    [
+        (1, 1, 128, 1024),
+        (1, 1, 128, 512),
+        (1, 1, 64, 512),
+        (1, 1, 32, 64),
+        (1, 1, 30, 60),
+        (1, 1, 1, 2),
+    ],
+)
 @pytest.mark.parametrize("mesh_shape", [(1, 2)])
 def test_collective_permute(shape: Shape, mesh_shape: Tuple[int, int], request):
     def collective_permute(in0: Operand, builder: TTIRBuilder):
@@ -247,7 +257,20 @@ def test_collective_permute(shape: Shape, mesh_shape: Tuple[int, int], request):
     )
 
 
-@pytest.mark.parametrize("shapes", [[(2048, 196), (196, 4096)]])
+@pytest.mark.parametrize(
+    "shapes",
+    [
+        [(2048, 196), (196, 4096)],
+        [(2046, 196), (196, 4094)],
+        [(100, 196), (196, 320)],
+        [(100, 194), (194, 320)],
+        [(98, 196), (196, 318)],
+        pytest.param(
+            [(2050, 196), (196, 4098)], marks=pytest.mark.run_error
+        ),  # https://github.com/tenstorrent/tt-metal/issues/21987
+        pytest.param([(10, 4), (4, 20)], marks=pytest.mark.run_error),
+    ],
+)
 @pytest.mark.parametrize("mesh_shape", [(1, 2)])
 def test_matmul_1x2(shapes: List[Shape], mesh_shape: Tuple[int, int], request):
     def matmul_1x2(in0: Operand, in1: Operand, builder: TTIRBuilder):
