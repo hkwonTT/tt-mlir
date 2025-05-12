@@ -24,18 +24,21 @@ def pseudo_golden_all_gather(
     [
         (1, 32, 128, 128),
         (1, 32, 120, 128),
-        (1, 32, 128, 120),
-        (1, 32, 120, 120),
         (1, 32, 60, 128),
-        (1, 32, 128, 60),
-        (1, 32, 60, 60),
         (1, 32, 30, 128),
-        (1, 32, 128, 30),
-        (1, 32, 30, 30),
         (1, 32, 2, 128),
-        (1, 32, 128, 2),
-        (1, 32, 2, 2),
-        (1, 1, 1, 2),
+        pytest.param(
+            (1, 32, 128, 120), marks=pytest.mark.fails_golden
+        ),  # https://github.com/tenstorrent/tt-metal/issues/21964
+        pytest.param((1, 32, 120, 120), marks=pytest.mark.fails_golden),
+        pytest.param((1, 32, 128, 60), marks=pytest.mark.fails_golden),
+        pytest.param((1, 32, 60, 60), marks=pytest.mark.fails_golden),
+        pytest.param((1, 32, 128, 30), marks=pytest.mark.fails_golden),
+        pytest.param((1, 32, 30, 30), marks=pytest.mark.fails_golden),
+        pytest.param((1, 32, 128, 2), marks=pytest.mark.fails_golden),
+        pytest.param((1, 32, 2, 2), marks=pytest.mark.fails_golden),
+        pytest.param((1, 1, 1, 2), marks=pytest.mark.fails_golden),
+        pytest.param((1, 1, 10, 10), marks=pytest.mark.fails_golden),
     ],
 )
 @pytest.mark.parametrize("mesh_shape", [(1, 2)])
@@ -76,7 +79,29 @@ def pseudo_golden_all_reduce(input_tensor: torch.Tensor):
     return output_tensor
 
 
-@pytest.mark.parametrize("shape", [(1, 1, 128, 512)])
+@pytest.mark.parametrize(
+    "shape",
+    [
+        (1, 1, 128, 512),
+        (1, 1, 130, 512),
+        (1, 1, 126, 512),
+        (1, 1, 128, 508),
+        (1, 1, 126, 508),
+        (1, 1, 130, 508),
+        (1, 1, 32, 2),
+        pytest.param(
+            (1, 1, 1, 2), marks=pytest.mark.fails_golden
+        ),  # https://github.com/tenstorrent/tt-metal/issues/21964
+        pytest.param(
+            (1, 1, 128, 516), marks=pytest.mark.run_error
+        ),  # https://github.com/tenstorrent/tt-metal/issues/21987
+        pytest.param((1, 1, 128, 516), marks=pytest.mark.run_error),
+        pytest.param((1, 1, 126, 516), marks=pytest.mark.run_error),
+        pytest.param((1, 1, 130, 516), marks=pytest.mark.run_error),
+        pytest.param((1, 1, 32, 4), marks=pytest.mark.run_error),
+        pytest.param((1, 1, 32, 8), marks=pytest.mark.run_error),
+    ],
+)
 @pytest.mark.parametrize("mesh_shape", [(1, 2)])
 def test_all_reduce(shape: Shape, mesh_shape: Tuple[int, int], request):
     def all_reduce(in0: Operand, builder: TTIRBuilder):
@@ -105,7 +130,11 @@ def test_all_reduce(shape: Shape, mesh_shape: Tuple[int, int], request):
         )
 
     compile_to_flatbuffer(
-        all_reduce, [shape], mesh_shape=mesh_shape, test_base=request.node.name
+        all_reduce,
+        [shape],
+        mesh_shape=mesh_shape,
+        test_base=request.node.name,
+        module_dump=True,
     )
 
 
