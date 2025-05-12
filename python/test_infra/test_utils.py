@@ -74,6 +74,7 @@ def build_mlir_module(
     inputs_types: Optional[List[Union[torch.dtype, TypeInfo]]] = None,
     mesh_shape: Optional[Tuple[int, int]] = None,
     module_dump: bool = False,
+    output_file_name: str = "test_ttir.mlir",
     base: Optional[str] = None,
 ):
     """
@@ -181,9 +182,8 @@ def build_mlir_module(
         print(f"`{test_fn.__name__}` sucessfully transformed into a MLIR module.")
 
         base = test_fn.__name__ if base is None else base
-
         if module_dump:
-            with open(base + "_ttir.mlir", "w") as f:
+            with open(output_file_name + "_ttir.mlir", "w") as f:
                 f.write(str(module))
                 print(module)
 
@@ -346,6 +346,8 @@ def compile_to_flatbuffer(
     else:
         raise ValueError("Unsupported target: " + target)
 
+    output_ttir_file = get_target_path(output_root, test_base, target)
+
     # Compile model to TTIR MLIR
     module, builder = build_mlir_module(
         fn,
@@ -353,6 +355,7 @@ def compile_to_flatbuffer(
         inputs_types,
         mesh_shape=mesh_shape,
         module_dump=module_dump,
+        output_file_name=output_ttir_file,
     )
 
     output_file_mlir = get_target_path(output_root, test_base + mlir_suffix, target)
