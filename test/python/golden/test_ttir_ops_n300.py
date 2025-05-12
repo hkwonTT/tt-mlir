@@ -162,8 +162,12 @@ def pseudo_golden_reduce_scatter(
             (1, 1, 128, 64), marks=pytest.mark.run_error
         ),  # https://github.com/tenstorrent/tt-metal/issues/21987
         pytest.param((1, 1, 128, 516), marks=pytest.mark.run_error),
-        pytest.param((1, 1, 64, 128), marks=pytest.mark.run_error),  # hangs
-        pytest.param((1, 1, 32, 128), marks=pytest.mark.run_error),  # hangs
+        pytest.param(
+            (1, 1, 64, 128), marks=pytest.mark.run_error
+        ),  # hangs # https://github.com/tenstorrent/tt-metal/issues/21987
+        pytest.param(
+            (1, 1, 32, 128), marks=pytest.mark.run_error
+        ),  # hangs # https://github.com/tenstorrent/tt-metal/issues/21987
     ],
 )
 @pytest.mark.parametrize("mesh_shape", [(1, 2)])
