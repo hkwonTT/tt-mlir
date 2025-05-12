@@ -312,7 +312,28 @@ def test_matmul_1x2(shapes: List[Shape], mesh_shape: Tuple[int, int], request):
     )
 
 
-@pytest.mark.parametrize("shape", [(1, 256, 64, 256)])
+@pytest.mark.parametrize(
+    "shape",
+    [
+        (1, 256, 64, 256),
+        (1, 32, 32, 64),
+        (1, 32, 32, 62),
+        (1, 32, 32, 66),
+        (1, 32, 32, 32),
+        (1, 32, 32, 30),
+        (1, 32, 32, 34),
+        (1, 32, 31, 32),
+        (1, 32, 30, 32),
+        (1, 1, 1, 2),
+        (1, 1, 1, 4),
+        (1, 1, 1, 6),
+        (1, 1, 1, 8),
+        (1, 1, 3, 2),
+        (1, 1, 3, 4),
+        (1, 1, 3, 6),
+        (1, 1, 3, 8),
+    ],
+)
 @pytest.mark.parametrize("mesh_shape", [(1, 2)])
 def test_neg_1x2_dim_3(shape: Shape, mesh_shape: Tuple[int, int], request):
     def neg_1x2_dim_3(in0: Operand, builder: TTIRBuilder):
@@ -344,7 +365,28 @@ def test_neg_1x2_dim_3(shape: Shape, mesh_shape: Tuple[int, int], request):
     )
 
 
-@pytest.mark.parametrize("shape", [(1, 256, 64, 256)])
+@pytest.mark.parametrize(
+    "shape",
+    [
+        (1, 256, 64, 256),
+        (1, 64, 32, 32),
+        (1, 62, 32, 32),
+        (1, 66, 32, 32),
+        (1, 32, 32, 32),
+        (1, 30, 32, 32),
+        (1, 34, 32, 32),
+        (1, 32, 31, 32),
+        (1, 32, 30, 32),
+        (1, 2, 1, 1),
+        (1, 4, 1, 1),
+        (1, 6, 1, 1),
+        (1, 8, 1, 1),
+        (1, 2, 3, 1),
+        (1, 4, 3, 1),
+        (1, 6, 3, 1),
+        (1, 8, 3, 1),
+    ],
+)
 @pytest.mark.parametrize("mesh_shape", [(1, 2)])
 def test_neg_1x2_dim_1(shape: Shape, mesh_shape: Tuple[int, int], request):
     def neg_1x2_dim_1(in0: Operand, builder: TTIRBuilder):
@@ -376,7 +418,23 @@ def test_neg_1x2_dim_1(shape: Shape, mesh_shape: Tuple[int, int], request):
     )
 
 
-@pytest.mark.parametrize("shapes", [[(512, 1024), (512, 1024)]])
+@pytest.mark.parametrize(
+    "shapes",
+    [
+        [(512, 1024), (512, 1024)],
+        [(512, 1022), (512, 1022)],
+        [(512, 1020), (512, 1020)],
+        [(512, 1026), (512, 1026)],
+        [(512, 1028), (512, 1028)],
+        [(511, 1024), (511, 1024)],
+        [(510, 1024), (510, 1024)],
+        [(513, 1024), (513, 1024)],
+        [(514, 1024), (514, 1024)],
+        [(1, 2), (1, 2)],
+        [(2, 2), (2, 2)],
+        [(3, 6), (3, 6)],
+    ],
+)
 @pytest.mark.parametrize("mesh_shape", [(1, 2)])
 def test_eltwise_multidevice(shapes: List[Shape], mesh_shape: Tuple[int, int], request):
     def eltwise_multidevice(in0: Operand, in1: Operand, builder: TTIRBuilder):
