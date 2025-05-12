@@ -147,7 +147,25 @@ def pseudo_golden_reduce_scatter(
     return output_tensor
 
 
-@pytest.mark.parametrize("shape", [(1, 1, 8192, 512)])
+@pytest.mark.parametrize(
+    "shape",
+    [
+        (1, 1, 128, 512),
+        (1, 1, 128, 256),
+        (1, 1, 128, 128),
+        (1, 1, 127, 512),
+        (1, 1, 126, 512),
+        (1, 1, 129, 512),
+        (1, 1, 130, 512),
+        (1, 1, 128, 508),  # pcc
+        pytest.param(
+            (1, 1, 128, 64), marks=pytest.mark.run_error
+        ),  # https://github.com/tenstorrent/tt-metal/issues/21987
+        pytest.param((1, 1, 128, 516), marks=pytest.mark.run_error),
+        pytest.param((1, 1, 64, 128), marks=pytest.mark.run_error),  # hangs
+        pytest.param((1, 1, 32, 128), marks=pytest.mark.run_error),  # hangs
+    ],
+)
 @pytest.mark.parametrize("mesh_shape", [(1, 2)])
 def test_reduce_scatter(shape: Shape, mesh_shape: Tuple[int, int], request):
     def reduce_scatter(in0: Operand, builder: TTIRBuilder):
