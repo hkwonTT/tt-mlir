@@ -2043,4 +2043,16 @@ def TTNN_RequantizeOp : TTNN_Op<"requantize"> {
 
     let hasVerifier = 1;
 }
+
+def TTNN_PointToPointOp: TTNN_Op<"point_to_point"> {
+  let summary = "Point To Point operation.";
+  let description = "[{Point to point communcation op. Copy tensor across multi device}]";
+
+  let arguments = (ins AnyRankedTensor:$input,
+                         TTNN_Device:$device,
+                         TTNN_MeshCoordAttr:$dest_coord);
+  let results = (outs AnyRankedTensor:$result);
+  let hasVerifier = 1;
+}
+
 #endif
