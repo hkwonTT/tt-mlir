@@ -1395,15 +1395,89 @@ public:
   LogicalResult
   matchAndRewrite(ttir::AllToAllOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
+    ::mlir::RankedTensorType inputType =
+        mlir::cast<::mlir::RankedTensorType>(adaptor.getInput().getType());
+    auto inputShape = inputType.getShape();
+    int32_t splitDim = op.getSplitDim();
+    int32_t splitCount = op.getSplitCount();
+    int32_t concatDim = op.getConcatDim();
+    ::mlir::DenseIntElementsAttr replicaGroups = adaptor.getReplicaGroups();
+    auto replicaGroupsElems = replicaGroups.getValues<int64_t>();
+    auto replicaGroupsShape = replicaGroups.getType().getShape();
 
-    auto device = ::ttnn::utils::getOrInsertDevice(rewriter, op);
+    int32_t splitSize = inputShape[splitDim] / splitCount;
+    Location loc = op.getLoc();
+    llvm::SmallVector<int64_t> meshShape{lookupDevice(op).getMeshShape()};
+    // 1. Slice
+    llvm::SmallVector<int64_t> slicedShape(inputShape.begin(),
+                                           inputShape.end());
+    slicedShape[splitDim] = splitSize;
+    llvm::SmallVector<int32_t> steps(inputShape.size(), 1);
+    RankedTensorType slicedInputType =
+        RankedTensorType::Builder(inputType).setShape(slicedShape);
+    llvm::SmallVector<ttnn::SliceOp> sliceOps;
+    for (int32_t sliceIdx = 0; sliceIdx < splitCount; sliceIdx++) {
+      llvm::SmallVector<int32_t> begins(inputShape.size(), 0);
+      llvm::SmallVector<int32_t> ends(inputShape.begin(), inputShape.end());
+      begins[splitDim] = sliceIdx * splitSize;
+      ends[splitDim] = (sliceIdx + 1) * splitSize;
 
-    rewriter.replaceOpWithNewOp<ttnn::AllToAllOp>(
-        op, this->getTypeConverter()->convertType(op.getType()),
-        adaptor.getInput(), device, adaptor.getSplitDim(),
-        adaptor.getConcatDim(), adaptor.getSplitCount(),
-        adaptor.getClusterAxis());
+      ttnn::SliceOp sliceOp = rewriter.create<ttnn::SliceOp>(
+          loc, slicedInputType, adaptor.getInput(),
+          rewriter.getI32ArrayAttr(begins), rewriter.getI32ArrayAttr(ends),
+          rewriter.getI32ArrayAttr(steps));
+      sliceOps.push_back(sliceOp);
+    }
+    // 2. Reorganize
+    Value device = mlir::tt::ttnn::utils::getOrInsertDevice(rewriter, op);
+    std::vector<std::vector<ttnn::PointToPointOp>> reorgByDevice(
+        splitCount, std::vector<ttnn::PointToPointOp>(splitCount));
+    for (size_t sliceIdx = 0; sliceIdx < sliceOps.size(); sliceIdx++) {
+      ttnn::SliceOp &slice = sliceOps[sliceIdx];
+      RankedTensorType sliceOutType = slice.getResult().getType();
+      llvm::SmallVector<mlir::Type, 4> resultTypes(splitCount, sliceOutType);
+      mlir::TypeRange resultTypeRange(resultTypes);
+      auto deviceTensorOp = rewriter.create<ttnn::GetDeviceTensorsOp>(
+          loc, resultTypeRange, slice.getResult());
 
+      for (int64_t idx = 0; idx < replicaGroups.size(); idx++) {
+        int64_t groupId = idx / replicaGroupsShape[1];
+        // int64_t replicaId = idx % replicaGroupsShape[1];
+        auto slicedOutput = deviceTensorOp->getResult(idx);
+        int64_t targetId =
+            replicaGroupsElems[groupId * replicaGroupsShape[1] + sliceIdx];
+        auto destCoordAttr =
+            ttnn::MeshCoordAttr::get(rewriter.getContext(), groupId, sliceIdx);
+        reorgByDevice[targetId][sliceIdx] =
+            rewriter.create<ttnn::PointToPointOp>(loc, slicedOutput.getType(),
+                                                  slicedOutput, device,
+                                                  destCoordAttr);
+      }
+    }
+    std::vector<ttnn::AggregateAsTensorOp> reorgShards;
+    for (auto shards : reorgByDevice) {
+      llvm::SmallVector<Value, 4> inputs;
+      inputs.reserve(shards.size());
+      for (auto &shard : shards) {
+        inputs.push_back(shard.getResult());
+      }
+      // AggregateAsTensor API doesn't use DistributedTensorConfig argument if
+      // the storage_type of input tensor is 'DEVICE'
+      reorgShards.push_back(rewriter.create<ttnn::AggregateAsTensorOp>(
+          loc, shards[0].getResult().getType(), inputs,
+          ::mlir::tt::ttnn::DistributedTensorConfig::ShardTensor2D));
+    }
+
+    // 3. Concat
+    llvm::SmallVector<Value, 4> inputs;
+    inputs.reserve(reorgShards.size());
+    for (auto &shard : reorgShards) {
+      inputs.push_back(shard.getResult());
+    }
+    rewriter.replaceOpWithNewOp<ttnn::ConcatOp>(
+        op, this->getTypeConverter()->convertType(op.getType()), inputs,
+        concatDim,
+        /*memory_config=*/nullptr);
     return success();
   }
 };
