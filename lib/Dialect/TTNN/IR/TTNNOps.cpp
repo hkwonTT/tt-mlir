@@ -2222,6 +2222,16 @@ mlir::tt::ttnn::CollectivePermuteOp::fold(FoldAdaptor adaptor) {
 }
 
 //===----------------------------------------------------------------------===//
+// PointToPointOp
+//===----------------------------------------------------------------------===//
+
+// PointToPointOp verification
+::mlir::LogicalResult mlir::tt::ttnn::PointToPointOp::verify() {
+  // ToDo: Verifier
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
 // UpdateCacheOp
 //===----------------------------------------------------------------------===//
 
