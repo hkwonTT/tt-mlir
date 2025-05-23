@@ -79,6 +79,7 @@ union OpType {
   BatchNormOp
   PointToPointOp,
   GetDeviceTensorsOp,
+  AggregateAsTensorOp,
 }
 
 table Operation {

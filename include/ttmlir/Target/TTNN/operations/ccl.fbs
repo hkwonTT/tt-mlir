@@ -60,3 +60,9 @@ table GetDeviceTensorsOp {
   in: tt.target.ttnn.TensorRef;
   out: [tt.target.ttnn.TensorRef];
 }
+
+table AggregateAsTensorOp {
+  inputs: [tt.target.ttnn.TensorRef];
+  out: tt.target.ttnn.TensorRef;
+  config: DistributionStrategy;
+}
