@@ -78,6 +78,7 @@ union OpType {
   LoadCachedOp,
   BatchNormOp
   PointToPointOp,
+  GetDeviceTensorsOp,
 }
 
 table Operation {

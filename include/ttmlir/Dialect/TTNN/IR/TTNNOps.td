@@ -2025,4 +2025,15 @@ def TTNN_PointToPointOp: TTNN_Op<"point_to_point"> {
   let hasVerifier = 1;
 }
 
+def TTNN_GetDeviceTensorsOp : TTNN_Op<"get_device_tensors", [Pure]> {
+  let summary = "Splits a multi-device sharded tensor into multiple of single device tensors";
+  let description = [{
+    Takes a multi-device sharded tensor and returns a list of single device tensors, typically one per device.
+  }];
+
+  let arguments = (ins AnyRankedTensor:$input);
+  let results = (outs Variadic<AnyRankedTensor>:$outputs);
+  let hasVerifier = 1;
+}
+
 #endif
