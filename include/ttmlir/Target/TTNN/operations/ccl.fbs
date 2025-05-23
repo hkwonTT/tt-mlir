@@ -55,3 +55,8 @@ table PointToPointOp {
   device: tt.target.DeviceRef;
   dest_coord: Dim2d;
 }
+
+table GetDeviceTensorsOp {
+  in: tt.target.ttnn.TensorRef;
+  out: [tt.target.ttnn.TensorRef];
+}

@@ -2075,6 +2075,32 @@ public:
 };
 } // namespace
 
+// GetDeviceTensorsOp conversion pattern
+//
+namespace {
+class GetDeviceTensorsOpConversionPattern
+    : public TTNNToEmitCBaseOpConversionPattern<tt::ttnn::GetDeviceTensorsOp> {
+public:
+  using TTNNToEmitCBaseOpConversionPattern<
+      tt::ttnn::GetDeviceTensorsOp>::TTNNToEmitCBaseOpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(tt::ttnn::GetDeviceTensorsOp srcOp,
+                  tt::ttnn::GetDeviceTensorsOp::Adaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    ttnn_to_emitc::EmitCTTNNEmitter<tt::ttnn::GetDeviceTensorsOp> emitter(
+        srcOp, adaptor, rewriter);
+
+    llvm::SmallVector<mlir::Attribute> args{
+        emitter.emit(srcOp.getInput()),
+    };
+
+    emitter.replaceOp(*this, args);
+    return success();
+  }
+};
+} // namespace
+
 // PermuteOp conversion pattern
 //
 namespace {
@@ -2265,6 +2291,7 @@ void populateTTNNToEmitCPatterns(mlir::MLIRContext *ctx,
   patterns.add<AllToAllOpConversionPattern>(typeConverter, ctx);
   patterns.add<MeshShardOpConversionPattern>(typeConverter, ctx);
   patterns.add<PointToPointOpConversionPattern>(typeConverter, ctx);
+  patterns.add<GetDeviceTensorsOpConversionPattern>(typeConverter, ctx);
 
   // KV Cache ops
   //

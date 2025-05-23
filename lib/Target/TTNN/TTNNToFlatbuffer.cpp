@@ -770,6 +770,22 @@ createOp(FlatbufferObjectCache &cache, PointToPointOp op) {
       &destCoordFB);
 }
 
+::flatbuffers::Offset<::tt::target::ttnn::GetDeviceTensorsOp>
+createOp(FlatbufferObjectCache &cache, GetDeviceTensorsOp op) {
+  auto input = cache.at<::tt::target::ttnn::TensorRef>(
+      getOperandThroughDPSOps(op.getInput()));
+
+  std::vector<flatbuffers::Offset<::tt::target::ttnn::TensorRef>> outputs;
+  for (auto output : op.getOutputs()) {
+    outputs.push_back(cache.at<::tt::target::ttnn::TensorRef>(output));
+  }
+
+  auto outputsVec = cache.fbb->CreateVector(outputs);
+
+  return ::tt::target::ttnn::CreateGetDeviceTensorsOp(*cache.fbb, input,
+                                                      outputsVec);
+}
+
 ::flatbuffers::Offset<::tt::target::ttnn::PermuteOp>
 createOp(FlatbufferObjectCache &cache, PermuteOp op) {
   flatbuffers::Offset<::tt::target::ttnn::TensorRef> input =

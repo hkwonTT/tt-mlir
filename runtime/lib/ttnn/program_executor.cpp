@@ -8,6 +8,7 @@
 #include "operations/ccl/all_gather.h"
 #include "operations/ccl/all_to_all.h"
 #include "operations/ccl/collective_permute.h"
+#include "operations/ccl/get_device_tensors.h"
 #include "operations/ccl/mesh_shard.h"
 #include "operations/ccl/point_to_point.h"
 #include "operations/ccl/reduce_scatter.h"
@@ -319,6 +320,9 @@ void ProgramExecutor::runOperation(const ::tt::target::ttnn::Operation *op) {
   }
   case ::tt::target::ttnn::OpType::PointToPointOp: {
     return operations::ccl::run(op->type_as_PointToPointOp(), getContext());
+  }
+  case ::tt::target::ttnn::OpType::GetDeviceTensorsOp: {
+    return operations::ccl::run(op->type_as_GetDeviceTensorsOp(), getContext());
   }
   case ::tt::target::ttnn::OpType::ArangeOp: {
     return operations::creation::run(op->type_as_ArangeOp(), getContext());
