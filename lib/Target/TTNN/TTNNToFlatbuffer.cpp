@@ -786,6 +786,28 @@ createOp(FlatbufferObjectCache &cache, GetDeviceTensorsOp op) {
                                                       outputsVec);
 }
 
+::flatbuffers::Offset<::tt::target::ttnn::AggregateAsTensorOp>
+createOp(FlatbufferObjectCache &cache, AggregateAsTensorOp op) {
+
+  std::vector<::flatbuffers::Offset<::tt::target::ttnn::TensorRef>> ins;
+  for (auto input : op.getInputs()) {
+    ins.push_back(cache.at<::tt::target::ttnn::TensorRef>(
+        getOperandThroughDPSOps(input)));
+  }
+
+  auto outputType = op.getResult();
+  auto out = cache.getOrCreate(outputType, tensorValueToFlatbuffer,
+                               kHostAllocatedSize);
+  // ::tt::target::ttnn::DistributionStrategy strategy;
+
+  auto strategy = ::tt::target::ttnn::CreateDistributionStrategy(
+      *cache.fbb,
+      ::mlir::tt::ttnn::utils::toTargetDistributedTensorConfig(op.getConfig()));
+
+  return ::tt::target::ttnn::CreateAggregateAsTensorOpDirect(*cache.fbb, &ins,
+                                                             out, strategy);
+}
+
 ::flatbuffers::Offset<::tt::target::ttnn::PermuteOp>
 createOp(FlatbufferObjectCache &cache, PermuteOp op) {
   flatbuffers::Offset<::tt::target::ttnn::TensorRef> input =
