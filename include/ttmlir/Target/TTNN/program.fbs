@@ -77,6 +77,7 @@ union OpType {
   LoadCachedOp,
   BatchNormOp,
   ExtractShardsOp,
+  AggregateAsTensorOp,
 }
 
 table Operation {

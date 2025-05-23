@@ -5,6 +5,7 @@
 #include "tt/runtime/detail/ttnn/program_executor.h"
 
 #include "operations/cache/load_cached.h"
+#include "operations/ccl/aggregate_as_tensor.h"
 #include "operations/ccl/all_gather.h"
 #include "operations/ccl/collective_permute.h"
 #include "operations/ccl/extract_shards.h"
@@ -315,6 +316,10 @@ void ProgramExecutor::runOperation(const ::tt::target::ttnn::Operation *op) {
   }
   case ::tt::target::ttnn::OpType::ExtractShardsOp: {
     return operations::ccl::run(op->type_as_ExtractShardsOp(), getContext());
+  }
+  case ::tt::target::ttnn::OpType::AggregateAsTensorOp: {
+    return operations::ccl::run(op->type_as_AggregateAsTensorOp(),
+                                getContext());
   }
   case ::tt::target::ttnn::OpType::ArangeOp: {
     return operations::creation::run(op->type_as_ArangeOp(), getContext());

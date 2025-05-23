@@ -2161,6 +2161,19 @@ mlir::tt::ttnn::CollectivePermuteOp::fold(FoldAdaptor adaptor) {
 }
 
 //===----------------------------------------------------------------------===//
+// AggregateAsTensorOp
+//===----------------------------------------------------------------------===//
+
+::mlir::LogicalResult mlir::tt::ttnn::AggregateAsTensorOp::verify() {
+  mlir::OperandRange inputs = getInputs();
+  if (inputs.empty()) {
+    return emitOpError(
+        "AggregateAsTensorOp must have at least one input operand");
+  }
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
 // UpdateCacheOp
 //===----------------------------------------------------------------------===//
 

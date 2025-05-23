@@ -2054,4 +2054,33 @@ def TTNN_ExtractShardsOp : TTNN_Op<"extract_shards"> {
   let results = (outs Variadic<AnyRankedTensor>:$outputs);
 }
 
+def TTNN_AggregateAsTensorOp : TTNN_Op<"aggregate_as_tensor"> {
+  let summary = "Aggregates single-device tensors into a multi-device sharded tensor.";
+  let description = [{
+    This operation takes a list of single-device tensors and aggregates them into a single
+    multi-device sharded tensor. Each input tensor represents a partition of the data that
+    was previously extracted from a multi-device tensor or generated on a single device.
+
+    Internally, this operation leverages the `tnn::aggregate_as_tensor` API to combine the
+    device-specific tensors into a unified multi-device tensor representation.
+
+    Input:
+      - A variadic list of single-device tensors. Each tensor typically corresponds to the data
+        partition assigned to one device during sharding.
+      - A configuration attribute (`config`) that represents `::tt::tt_metal::DistributedTensorConfig`.
+
+    Output:
+      - A single multi-device sharded tensor that logically combines the per-device data
+        into a unified tensor for further distributed computation.
+
+    This operation is useful for consolidating the results of per-device processing back into
+    a single logical tensor that can participate in subsequent multi-device operations.
+  }];
+
+  let arguments = (ins Variadic<AnyRankedTensor>:$inputs,
+                  TTNN_DistributedTensorConfigAttr:$config);
+  let results = (outs AnyRankedTensor:$output);
+  let hasVerifier = 1;
+}
+
 #endif

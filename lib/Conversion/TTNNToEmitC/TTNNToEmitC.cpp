@@ -2056,6 +2056,33 @@ public:
 };
 } // namespace
 
+// AggregateAsTensorOp conversion pattern
+//
+namespace {
+class AggregateAsTensorOpConversionPattern
+    : public TTNNToEmitCBaseOpConversionPattern<tt::ttnn::AggregateAsTensorOp> {
+public:
+  using TTNNToEmitCBaseOpConversionPattern<
+      tt::ttnn::AggregateAsTensorOp>::TTNNToEmitCBaseOpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(tt::ttnn::AggregateAsTensorOp srcOp,
+                  tt::ttnn::AggregateAsTensorOp::Adaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    ttnn_to_emitc::EmitCTTNNEmitter<tt::ttnn::AggregateAsTensorOp> emitter(
+        srcOp, adaptor, rewriter);
+
+    llvm::SmallVector<mlir::Attribute> args{
+        emitter.emit(srcOp.getInputs()),
+        // emitter.emit(srcOp.getConfig()),
+    };
+
+    emitter.replaceOp(*this, args);
+    return success();
+  }
+};
+} // namespace
+
 // PermuteOp conversion pattern
 //
 namespace {
@@ -2247,6 +2274,7 @@ void populateTTNNToEmitCPatterns(mlir::MLIRContext *ctx,
   patterns.add<CollectivePermuteOpConversionPattern>(typeConverter, ctx);
   patterns.add<MeshShardOpConversionPattern>(typeConverter, ctx);
   patterns.add<ExtractShardsOpConversionPattern>(typeConverter, ctx);
+  patterns.add<AggregateAsTensorOpConversionPattern>(typeConverter, ctx);
 
   // KV Cache ops
   //
