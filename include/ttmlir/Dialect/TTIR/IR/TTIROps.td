@@ -2290,7 +2290,7 @@ def TTIR_AllToAllOp : TTIR_NamedOp<"all_to_all"> {
                          SI32Attr:$split_dim,
                          SI32Attr:$concat_dim,
                          SI32Attr:$split_count,
-                         UI32Attr:$cluster_axis);
+                         I64ElementsAttr:$replica_groups);
 
     let results = (outs AnyRankedTensor:$result);
     let hasVerifier = 1;

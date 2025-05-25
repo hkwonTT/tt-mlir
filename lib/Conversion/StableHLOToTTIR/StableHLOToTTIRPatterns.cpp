@@ -1878,17 +1878,10 @@ public:
     auto outputType = mlir::cast<RankedTensorType>(
         getTypeConverter()->convertType(srcOp.getResult(0).getType()));
 
-    // Determine cluster axis based on replica groups
-    uint32_t clusterAxis;
-    if (failed(determineClusterAxis(adaptor.getReplicaGroups(), clusterAxis))) {
-      return rewriter.notifyMatchFailure(
-          srcOp, "AllToAll cannot specify cluster axis.");
-    }
-
     ttir::utils::replaceOpWithNewDPSOp<mlir::tt::ttir::AllToAllOp>(
         rewriter, srcOp, outputType, adaptor.getOperands()[0],
         adaptor.getSplitDimension(), adaptor.getConcatDimension(),
-        adaptor.getSplitCount(), clusterAxis);
+        adaptor.getSplitCount(), adaptor.getReplicaGroups());
 
     return success();
   }
