@@ -4,8 +4,6 @@
 
 #include "operations/ccl/point_to_point.h"
 #include "tt/runtime/detail/logger.h"
-#include "tt/runtime/detail/ttnn/operations/utils.h"
-#include "tt/runtime/detail/ttnn/ttnn.h"
 #include "tt/runtime/detail/ttnn/utils.h"
 
 /*
@@ -17,8 +15,17 @@ void run(const ::tt::target::ttnn::PointToPointOp *op,
   ProgramTensorPool &tensorPool = context.getTensorPool();
   const ::ttnn::Tensor &inputTensor =
       tensorPool.getTTNNTensorAndValidate(op->in());
+  DEBUG_ASSERT(!::tt::runtime::ttnn::utils::inSystemMemory(op->in()),
+               "Calling ttnn::from_device on a host tensor");
 
-  // ToDo: Implement something
+  ::ttnn::MeshCoordinate coord(op->dest_coord()->y(), op->dest_coord()->x());
+
+  ::ttnn::MeshDevice &meshDevice = context.getMeshDevice();
+  ::ttnn::IDevice *targetDevice = meshDevice.get_device(coord);
+
+  ::ttnn::Tensor hostTensor = ::ttnn::from_device(inputTensor);
+  ::ttnn::Tensor out =
+      ::ttnn::to_device(hostTensor, targetDevice, inputTensor.memory_config());
 
   tensorPool.insertTTNNTensorAndValidate(op->out(), inputTensor);
 }
