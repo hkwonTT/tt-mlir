@@ -4,7 +4,7 @@
 import torch
 import pytest
 
-from typing import List, Tuple, Union
+from typing import List, Tuple, Union, Generator
 from ttir_builder.utils import compile_to_flatbuffer
 from ttir_builder import Operand, TTIRBuilder, Shape
 
@@ -1011,6 +1011,7 @@ def test_matmul_and_binary_op_2(
         test_base=request.node.name,
     )
 
+
 def pseudo_golden_all_to_all(
     input: torch.Tensor,
     split_dim: int,
@@ -1096,11 +1097,38 @@ def isValidDeviceSharding(input_shape: Shape, mesh_shape: Tuple[int, int], shard
     return True
 
 
+def gen_mesh_shapes(num_devices: int) -> Generator[Tuple[int, int], None, None]:
+    for rows in range(1, num_devices + 1):
+        if num_devices % rows == 0:
+            cols = num_devices // rows
+            yield (rows, cols)
+
+
+def gen_replica_groups(rows: int, cols: int) -> Generator[List[List[int]], None, None]:
+    # Row-major device IDs: id = r * cols + c
+    col_clusters = [[r * cols + c for r in range(rows)] for c in range(cols)]
+    row_clusters = [[r * cols + c for c in range(cols)] for r in range(rows)]
+
+    yield col_clusters
+    yield row_clusters
+
+
+def gen_mesh_configurations(num_devices: int):
+    """
+    Yield (mesh_shape, replica_group_list) pairs.
+    """
+    for shape in gen_mesh_shapes(num_devices):
+        rows, cols = shape
+        # delegate to the replica group generator
+        yield from ((shape, groups) for groups in gen_replica_groups(rows, cols))
+
+
 @pytest.mark.parametrize("input_shape", [(256, 256), (64, 64), (128, 64), (192, 64)])
-@pytest.mark.parametrize("mesh_shape", [(1, 8), (2, 4), (4, 2), (8, 1)])
+@pytest.mark.parametrize(
+    ("mesh_shape", "replica_groups"), list(gen_mesh_configurations(8))
+)
 @pytest.mark.parametrize("split_dim", [0, 1])
 @pytest.mark.parametrize("concat_dim", [0, 1])
-@pytest.mark.parametrize("cluster_axis", [0, 1])
 @pytest.mark.parametrize("shard_dim_0", [-1, 0, 1])
 @pytest.mark.parametrize("shard_dim_1", [-1, 0, 1])
 def test_all_to_all_2d(
@@ -1108,7 +1136,7 @@ def test_all_to_all_2d(
     mesh_shape: Tuple[int, int],
     split_dim,
     concat_dim,
-    cluster_axis,
+    replica_groups,
     shard_dim_0,
     shard_dim_1,
     request,
@@ -1117,11 +1145,12 @@ def test_all_to_all_2d(
     if isValidDeviceSharding(input_shape, mesh_shape, shard_dims) == False:
         pytest.skip("Sharding is not possible")
     shard_shape = generateShardShape(len(input_shape), mesh_shape, shard_dims)
-    if shard_dims[cluster_axis] == -1 or shard_shape[shard_dims[cluster_axis]] == 1:
+    if len(replica_groups) <= 0:
+        pytest.skip("Wrong replica group")
+    split_count = len(replica_groups[0])
+    if split_count == 1:
         pytest.skip("all to all across 1 device")
-    if (input_shape[split_dim] / shard_shape[split_dim]) % mesh_shape[
-        cluster_axis
-    ] != 0:
+    if (input_shape[split_dim] / shard_shape[split_dim]) % split_count != 0:
         pytest.skip("Cannot split tensor evenly")
 
     def all_to_all(in0: Operand, builder: TTIRBuilder):
@@ -1147,8 +1176,8 @@ def test_all_to_all_2d(
             sharded,
             split_dim=split_dim,
             concat_dim=concat_dim,
-            split_count=mesh_shape[cluster_axis],
-            cluster_axis=cluster_axis,
+            split_count=split_count,
+            replica_groups=replica_groups,
         )
         return builder.mesh_shard(
             gathered,
