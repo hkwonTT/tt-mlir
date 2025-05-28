@@ -2002,6 +2002,11 @@ emitTTNNOperation(FlatbufferObjectCache &cache, Operation *op,
     return createOperation(cache, createOp(cache, pointToPointOp), debugString,
                            locInfo);
   }
+  if (auto aggregateAsTensorOp = dyn_cast<AggregateAsTensorOp>(op);
+      aggregateAsTensorOp) {
+    return createOperation(cache, createOp(cache, aggregateAsTensorOp),
+                           debugString, locInfo);
+  }
 
   llvm_unreachable("unhandled op in emitTTNNOperation");
 }
