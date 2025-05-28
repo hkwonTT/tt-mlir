@@ -1408,6 +1408,7 @@ public:
     int32_t splitSize = inputShape[splitDim] / splitCount;
     Location loc = op.getLoc();
     llvm::SmallVector<int64_t> meshShape{lookupDevice(op).getMeshShape()};
+    size_t deviceCount = replicaGroupsElems.size();
     // 1. Slice
     llvm::SmallVector<int64_t> slicedShape(inputShape.begin(),
                                            inputShape.end());
@@ -1431,11 +1432,11 @@ public:
     // 2. Reorganize
     Value device = mlir::tt::ttnn::utils::getOrInsertDevice(rewriter, op);
     std::vector<std::vector<ttnn::PointToPointOp>> reorgByDevice(
-        splitCount, std::vector<ttnn::PointToPointOp>(splitCount));
+        deviceCount, std::vector<ttnn::PointToPointOp>());
     for (size_t sliceIdx = 0; sliceIdx < sliceOps.size(); sliceIdx++) {
       ttnn::SliceOp &slice = sliceOps[sliceIdx];
       RankedTensorType sliceOutType = slice.getResult().getType();
-      llvm::SmallVector<mlir::Type, 4> resultTypes(splitCount, sliceOutType);
+      llvm::SmallVector<mlir::Type, 8> resultTypes(deviceCount, sliceOutType);
       mlir::TypeRange resultTypeRange(resultTypes);
       auto deviceTensorOp = rewriter.create<ttnn::GetDeviceTensorsOp>(
           loc, resultTypeRange, slice.getResult());
@@ -1448,16 +1449,14 @@ public:
             replicaGroupsElems[groupId * replicaGroupsShape[1] + sliceIdx];
         auto destCoordAttr =
             ttnn::MeshCoordAttr::get(rewriter.getContext(), groupId, sliceIdx);
-        reorgByDevice[targetId][sliceIdx] =
-            rewriter.create<ttnn::PointToPointOp>(loc, slicedOutput.getType(),
-                                                  slicedOutput, device,
-                                                  destCoordAttr);
+        reorgByDevice[targetId].push_back(rewriter.create<ttnn::PointToPointOp>(
+            loc, slicedOutput.getType(), slicedOutput, device, destCoordAttr));
       }
     }
+
     std::vector<ttnn::AggregateAsTensorOp> reorgShards;
     for (auto shards : reorgByDevice) {
       llvm::SmallVector<Value, 4> inputs;
-      inputs.reserve(shards.size());
       for (auto &shard : shards) {
         inputs.push_back(shard.getResult());
       }
