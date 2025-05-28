@@ -2145,6 +2145,11 @@ emitTTNNOperation(FlatbufferObjectCache &cache, Operation *op,
     return createOperation(cache, createEltwiseUnaryOp(cache, erfOp),
                            debugString, locInfo);
   }
+  if (auto getDeviceTensorsOp = dyn_cast<GetDeviceTensorsOp>(op);
+      getDeviceTensorsOp) {
+    return createOperation(cache, createOp(cache, getDeviceTensorsOp),
+                           debugString, locInfo);
+  }
 
   llvm_unreachable("unhandled op in emitTTNNOperation");
 }
