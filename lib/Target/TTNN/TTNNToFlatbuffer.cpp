@@ -1998,6 +1998,10 @@ emitTTNNOperation(FlatbufferObjectCache &cache, Operation *op,
     return createOperation(cache, createOp(cache, getDeviceTensorsOp),
                            debugString, locInfo);
   }
+  if (auto pointToPointOp = dyn_cast<PointToPointOp>(op); pointToPointOp) {
+    return createOperation(cache, createOp(cache, pointToPointOp), debugString,
+                           locInfo);
+  }
 
   llvm_unreachable("unhandled op in emitTTNNOperation");
 }
