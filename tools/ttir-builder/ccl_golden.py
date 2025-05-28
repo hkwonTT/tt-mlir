@@ -86,11 +86,10 @@ def all_to_all_golden(
     split_dim: int,
     concat_dim: int,
     split_count: int,
-    cluster_axis: int,
+    replica_groups: List[List[int]],
 ) -> torch.Tensor:
     # Return a random torch.Tensor which has the correct shape and type after doing all_gather on the input.
-    num_devices = mesh_shape[cluster_axis]
     out_shape = list(input.shape)
-    out_shape[split_dim] //= num_devices
-    out_shape[concat_dim] *= num_devices
+    out_shape[split_dim] //= split_count
+    out_shape[concat_dim] *= split_count
     return torch.randn(out_shape, dtype=input.dtype)
