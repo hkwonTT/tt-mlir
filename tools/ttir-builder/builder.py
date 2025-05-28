@@ -2314,13 +2314,13 @@ class TTIRBuilder:
         split_dim: int,
         concat_dim: int,
         split_count: int,
-        cluster_axis: int,
+        replica_groups: List[List[int]],
     ) -> OpView:
         kwargs = {
             "split_dim": split_dim,
             "concat_dim": concat_dim,
             "split_count": split_count,
-            "cluster_axis": cluster_axis,
+            "replica_groups": replica_groups,
         }
         return self.ccl_proxy(
             all_to_all_golden,
