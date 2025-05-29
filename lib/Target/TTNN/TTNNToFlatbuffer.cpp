@@ -773,7 +773,8 @@ createOp(FlatbufferObjectCache &cache, GetDeviceTensorsOp op) {
 
   std::vector<flatbuffers::Offset<::tt::target::ttnn::TensorRef>> outputs;
   for (auto output : op.getOutputs()) {
-    outputs.push_back(cache.at<::tt::target::ttnn::TensorRef>(output));
+    outputs.push_back(
+        cache.getOrCreate(output, tensorValueToFlatbuffer, kHostAllocatedSize));
   }
 
   auto outputsVec = cache.fbb->CreateVector(outputs);
