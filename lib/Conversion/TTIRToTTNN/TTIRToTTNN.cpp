@@ -1433,8 +1433,8 @@ public:
     }
     // 2. Reorganize
     Value device = mlir::tt::ttnn::utils::getOrInsertDevice(rewriter, op);
-    std::vector<std::vector<ttnn::PointToPointOp>> reorgByDevice(
-        deviceCount, std::vector<ttnn::PointToPointOp>());
+    std::vector<std::vector<ttnn::PointToPointOp>> reorg(
+        splitCount, std::vector<ttnn::PointToPointOp>(deviceCount));
     for (size_t sliceIdx = 0; sliceIdx < sliceOps.size(); sliceIdx++) {
       ttnn::SliceOp &slice = sliceOps[sliceIdx];
       RankedTensorType sliceOutType = slice.getResult().getType();
@@ -1443,21 +1443,35 @@ public:
       auto deviceTensorOp = rewriter.create<ttnn::GetDeviceTensorsOp>(
           loc, resultTypeRange, slice.getResult());
 
-      for (int64_t idx = 0; idx < replicaGroups.size(); idx++) {
-        int64_t groupId = idx / replicaGroupsShape[1];
-        // int64_t replicaId = idx % replicaGroupsShape[1];
-        auto slicedOutput = deviceTensorOp->getResult(idx);
+      for (int64_t srcId = 0; srcId < replicaGroups.size(); srcId++) {
+        int64_t groupId = srcId / replicaGroupsShape[1];
+        int64_t replicaId = srcId % replicaGroupsShape[1];
+        auto slicedOutput = deviceTensorOp->getResult(srcId);
         int64_t targetId =
             replicaGroupsElems[groupId * replicaGroupsShape[1] + sliceIdx];
-        auto destCoordAttr =
-            ttnn::MeshCoordAttr::get(rewriter.getContext(), groupId, sliceIdx);
-        reorgByDevice[targetId].push_back(rewriter.create<ttnn::PointToPointOp>(
-            loc, slicedOutput.getType(), slicedOutput, device, destCoordAttr));
+        op.emitWarning() << "P2P destCoord : " << targetId / meshShape[1] << "x"
+                         << targetId % meshShape[1];
+        auto destCoordAttr = ttnn::MeshCoordAttr::get(rewriter.getContext(),
+                                                      targetId / meshShape[1],
+                                                      targetId % meshShape[1]);
+        reorg[replicaId][targetId] = rewriter.create<ttnn::PointToPointOp>(
+            loc, slicedOutput.getType(), slicedOutput, device, destCoordAttr);
+        op.emitWarning() << "reorg[" << replicaId << "][" << targetId << "]";
+      }
+    }
+    for (size_t i = 0; i < reorg.size(); i++) {
+      auto &shards = reorg[i];
+      for (size_t j = 0; j < shards.size(); j++) {
+        if (shards[j] == nullptr) {
+          op.emitWarning() << "[" << i << "][" << j << "] is empty";
+        } else {
+          op.emitWarning() << "[" << i << "][" << j << "] is filled";
+        }
       }
     }
 
     std::vector<ttnn::AggregateAsTensorOp> reorgShards;
-    for (auto shards : reorgByDevice) {
+    for (auto shards : reorg) {
       llvm::SmallVector<Value, 4> inputs;
       for (auto &shard : shards) {
         inputs.push_back(shard.getResult());
@@ -1466,7 +1480,7 @@ public:
       // the storage_type of input tensor is 'DEVICE'
       reorgShards.push_back(rewriter.create<ttnn::AggregateAsTensorOp>(
           loc, shards[0].getResult().getType(), inputs,
-          ::mlir::tt::ttnn::DistributedTensorConfig::ShardTensor2D));
+          ::mlir::tt::ttnn::DistributedTensorConfig::AllGatherTensor));
     }
 
     // 3. Concat
