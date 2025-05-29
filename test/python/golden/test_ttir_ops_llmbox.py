@@ -1012,7 +1012,7 @@ def test_matmul_and_binary_op_2(
     )
 
 
-def pseudo_golden_all_to_all(
+def pseudo_golden_all_to_all_old(
     input: torch.Tensor,
     split_dim: int,
     concat_dim: int,
@@ -1073,6 +1073,49 @@ def pseudo_golden_all_to_all(
     return output
 
 
+def pseudo_golden_all_to_all(
+    input: torch.Tensor,
+    split_dim: int,
+    concat_dim: int,
+    mesh_shape: Tuple[int, int],
+    shard_dims: Tuple[int, int],
+    replica_groups: List[List[int]],
+):
+    def sharding(t: torch.Tensor, chunks: int, dim: int):
+        if dim == -1 or chunks == 1:
+            return [t]
+        return torch.chunk(t, chunks, dim=dim)
+
+    # sharding
+    input_shards = []
+    for row_shard in torch.chunk(input, mesh_shape[0], dim=shard_dims[0]):
+        for shard in torch.chunk(row_shard, mesh_shape[1], dim=shard_dims[1]):
+            input_shards.append(shard)
+    # all-to-all : split
+    split_count = len(replica_groups[0])
+    sliced_shards = []
+    for dev_id, shard in enumerate(input_shards):
+        sliced_shards.append(torch.chunk(shard, split_count, split_dim))
+
+    # all-to-all : exchange, concat
+    sharded_output = [None] * (mesh_shape[0] * mesh_shape[1])
+    for slice_idx in range(0, split_count):
+        for group in replica_groups:
+            exchanged = []
+            for dev_id in group:
+                exchanged.append(sliced_shards[dev_id][slice_idx])
+            sharded_output[group[slice_idx]] = torch.cat(exchanged, dim=concat_dim)
+    # unsharding
+    row_shards = [
+        torch.cat(
+            sharded_output[r * mesh_shape[1] : (r + 1) * mesh_shape[1]],
+            dim=shard_dims[1],
+        )
+        for r in range(mesh_shape[0])
+    ]
+    return torch.cat(row_shards, dim=shard_dims[0])
+
+
 def generateShardShape(
     input_rank: int, mesh_shape: Tuple[int, int], shard_dims: Tuple[int, int]
 ):
@@ -1109,8 +1152,8 @@ def gen_replica_groups(rows: int, cols: int) -> Generator[List[List[int]], None,
     col_clusters = [[r * cols + c for r in range(rows)] for c in range(cols)]
     row_clusters = [[r * cols + c for c in range(cols)] for r in range(rows)]
 
-    yield col_clusters
-    yield row_clusters
+    yield col_clusters, 0
+    yield row_clusters, 1
 
 
 def gen_mesh_configurations(num_devices: int):
@@ -1120,15 +1163,20 @@ def gen_mesh_configurations(num_devices: int):
     for shape in gen_mesh_shapes(num_devices):
         rows, cols = shape
         # delegate to the replica group generator
-        yield from ((shape, groups) for groups in gen_replica_groups(rows, cols))
+        yield from (
+            (shape, groups, cluster_axis)
+            for groups, cluster_axis in gen_replica_groups(rows, cols)
+        )
 
 
 @pytest.mark.parametrize("input_shape", [(256, 256), (64, 64), (128, 64), (192, 64)])
 @pytest.mark.parametrize(
-    ("mesh_shape", "replica_groups"), list(gen_mesh_configurations(8))
+    ("mesh_shape", "replica_groups", "cluster_axis"), list(gen_mesh_configurations(8))
 )
 @pytest.mark.parametrize("split_dim", [0, 1])
 @pytest.mark.parametrize("concat_dim", [0, 1])
+# @pytest.mark.parametrize("shard_dim_0", [0, 1])
+# @pytest.mark.parametrize("shard_dim_1", [0, 1])
 @pytest.mark.parametrize("shard_dim_0", [-1, 0, 1])
 @pytest.mark.parametrize("shard_dim_1", [-1, 0, 1])
 def test_all_to_all_2d(
@@ -1139,6 +1187,7 @@ def test_all_to_all_2d(
     replica_groups,
     shard_dim_0,
     shard_dim_1,
+    cluster_axis,
     request,
 ):
     shard_dims = (shard_dim_0, shard_dim_1)
@@ -1152,10 +1201,11 @@ def test_all_to_all_2d(
         pytest.skip("all to all across 1 device")
     if (input_shape[split_dim] / shard_shape[split_dim]) % split_count != 0:
         pytest.skip("Cannot split tensor evenly")
+    print(mesh_shape)
 
     def all_to_all(in0: Operand, builder: TTIRBuilder):
         input = builder._get_golden_tensor(in0)
-        golden_output = pseudo_golden_all_to_all(
+        golden_output_old = pseudo_golden_all_to_all_old(
             input,
             split_dim=split_dim,
             concat_dim=concat_dim,
@@ -1163,6 +1213,15 @@ def test_all_to_all_2d(
             shard_dims=shard_dims,
             cluster_axis=cluster_axis,
         )
+        golden_output = pseudo_golden_all_to_all(
+            input,
+            split_dim=split_dim,
+            concat_dim=concat_dim,
+            mesh_shape=mesh_shape,
+            shard_dims=shard_dims,
+            replica_groups=replica_groups,
+        )
+        assert torch.equal(golden_output, golden_output_old)
         builder.set_graph_input_output([input], [golden_output])
 
         sharded = builder.mesh_shard(
@@ -1200,6 +1259,7 @@ def test_all_to_all_2d(
         test_base=generate_test_base(),
         output_root=request.config.getoption("--path"),
         system_desc_path=request.config.getoption("--sys-desc"),
+        module_dump=True,
     )
 
 
@@ -1213,10 +1273,11 @@ def test_all_to_all_2d(
         (64, 1, 1, 128),
     ],
 )
-@pytest.mark.parametrize("mesh_shape", [(1, 8), (2, 4), (4, 2), (8, 1)])
+@pytest.mark.parametrize(
+    ("mesh_shape", "replica_groups", "cluster_axis"), list(gen_mesh_configurations(8))
+)
 @pytest.mark.parametrize("split_dim", [0, 1, 2, 3])
 @pytest.mark.parametrize("concat_dim", [0, 1, 2, 3])
-@pytest.mark.parametrize("cluster_axis", [0, 1])
 @pytest.mark.parametrize("shard_dim_0", [-1, 0, 1, 2, 3])
 @pytest.mark.parametrize("shard_dim_1", [-1, 0, 1, 2, 3])
 def test_all_to_all_4d(
@@ -1224,25 +1285,27 @@ def test_all_to_all_4d(
     mesh_shape: Tuple[int, int],
     split_dim,
     concat_dim,
-    cluster_axis,
+    replica_groups,
     shard_dim_0,
     shard_dim_1,
+    cluster_axis,
     request,
 ):
     shard_dims = (shard_dim_0, shard_dim_1)
     if isValidDeviceSharding(input_shape, mesh_shape, shard_dims) == False:
         pytest.skip("Sharding is not possible")
     shard_shape = generateShardShape(len(input_shape), mesh_shape, shard_dims)
-    if shard_dims[cluster_axis] == -1 or shard_shape[shard_dims[cluster_axis]] == 1:
+    if len(replica_groups) <= 0:
+        pytest.skip("Wrong replica group")
+    split_count = len(replica_groups[0])
+    if split_count == 1:
         pytest.skip("all to all across 1 device")
-    if (input_shape[split_dim] / shard_shape[split_dim]) % mesh_shape[
-        cluster_axis
-    ] != 0:
+    if (input_shape[split_dim] / shard_shape[split_dim]) % split_count != 0:
         pytest.skip("Cannot split tensor evenly")
 
     def all_to_all(in0: Operand, builder: TTIRBuilder):
         input = builder._get_golden_tensor(in0)
-        golden_output = pseudo_golden_all_to_all(
+        golden_output_old = pseudo_golden_all_to_all_old(
             input,
             split_dim=split_dim,
             concat_dim=concat_dim,
@@ -1250,6 +1313,15 @@ def test_all_to_all_4d(
             shard_dims=shard_dims,
             cluster_axis=cluster_axis,
         )
+        golden_output = pseudo_golden_all_to_all(
+            input,
+            split_dim=split_dim,
+            concat_dim=concat_dim,
+            mesh_shape=mesh_shape,
+            shard_dims=shard_dims,
+            replica_groups=replica_groups,
+        )
+        assert golden_output == golden_output_old
         builder.set_graph_input_output([input], [golden_output])
 
         sharded = builder.mesh_shard(
