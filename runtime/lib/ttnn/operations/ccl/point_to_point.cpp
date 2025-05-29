@@ -21,12 +21,34 @@ void run(const ::tt::target::ttnn::PointToPointOp *op,
   ::ttnn::MeshCoordinate coord(op->dest_coord()->y(), op->dest_coord()->x());
 
   ::ttnn::MeshDevice &meshDevice = context.getMeshDevice();
+  ::ttnn::Tensor hostTensor = ::ttnn::from_device(inputTensor);
+  auto targetSubmesh =
+      meshDevice.create_submesh(::ttnn::MeshShape(1, 1), coord);
+  ::ttnn::Tensor deviceTensor = ::ttnn::to_device(
+      hostTensor, targetSubmesh.get(), inputTensor.memory_config());
+
+  //   ::ttnn::Tensor deviceTensor = inputTensor;
+
+  /*
   ::ttnn::IDevice *targetDevice = meshDevice.get_device(coord);
 
   ::ttnn::Tensor hostTensor = ::ttnn::from_device(inputTensor);
-  ::ttnn::Tensor out =
+  bool isMultiDeviceTensor =
+      (hostTensor.storage_type() == ::ttnn::StorageType::MULTI_DEVICE_HOST);
+  if (isMultiDeviceTensor) {
+    hostTensor =
+        ::ttnn::Tensor(tt_metal::host_buffer::get_host_buffer(hostTensor),
+                       hostTensor.tensor_spec());
+  }
+  ::ttnn::Tensor deviceTensor =
       ::ttnn::to_device(hostTensor, targetDevice, inputTensor.memory_config());
+  if (isMultiDeviceTensor) {
+    ::ttnn::Tensor temp = ::ttnn::Tensor(deviceTensor.storage(),
+  deviceTensor.tensor_spec(), inputTensor.distributed_tensor_config());
+    deviceTensor = temp;
+  }
+  */
 
-  tensorPool.insertTTNNTensorAndValidate(op->out(), inputTensor);
+  tensorPool.insertTTNNTensorAndValidate(op->out(), deviceTensor);
 }
 } // namespace tt::runtime::ttnn::operations::ccl
