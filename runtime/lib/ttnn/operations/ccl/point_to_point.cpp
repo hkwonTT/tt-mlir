@@ -5,6 +5,7 @@
 #include "operations/ccl/point_to_point.h"
 #include "tt/runtime/detail/logger.h"
 #include "tt/runtime/detail/ttnn/utils.h"
+#include <optional>
 
 /*
 This is a temporary host fallback to ttnn::PointToPoint(..) API.
@@ -17,17 +18,20 @@ void run(const ::tt::target::ttnn::PointToPointOp *op,
       tensorPool.getTTNNTensorAndValidate(op->in());
   DEBUG_ASSERT(!::tt::runtime::ttnn::utils::inSystemMemory(op->in()),
                "Calling ttnn::from_device on a host tensor");
-
-  ::ttnn::MeshCoordinate coord(op->dest_coord()->y(), op->dest_coord()->x());
-
   ::ttnn::MeshDevice &meshDevice = context.getMeshDevice();
-  ::ttnn::Tensor hostTensor = ::ttnn::from_device(inputTensor);
+
+  ::ttnn::MeshCoordinate coord(0, 0);
   auto targetSubmesh =
       meshDevice.create_submesh(::ttnn::MeshShape(1, 1), coord);
-  ::ttnn::Tensor deviceTensor = ::ttnn::to_device(
-      hostTensor, targetSubmesh.get(), inputTensor.memory_config());
+  auto id = targetSubmesh->get_device(::ttnn::MeshCoordinate(0, 0))->id();
+  LOG_DEBUG("target device ID :", id, " (", coord.coords()[0], ",",
+            coord.coords()[1], ")");
 
-  //   ::ttnn::Tensor deviceTensor = inputTensor;
+  ::ttnn::Tensor hostTensor = ::ttnn::from_device(inputTensor);
+  ::ttnn::Tensor deviceTensor =
+      ::ttnn::to_device(hostTensor, targetSubmesh.get(), std::nullopt);
+
+  // ::ttnn::Tensor deviceTensor = inputTensor;
 
   /*
   ::ttnn::IDevice *targetDevice = meshDevice.get_device(coord);
