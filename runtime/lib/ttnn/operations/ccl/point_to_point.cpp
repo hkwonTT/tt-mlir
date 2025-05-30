@@ -5,6 +5,7 @@
 #include "operations/ccl/point_to_point.h"
 #include "tt/runtime/detail/logger.h"
 #include "tt/runtime/detail/ttnn/utils.h"
+#include <optional>
 
 /*
 This is a temporary host fallback to ttnn::PointToPoint(..) API.
@@ -24,8 +25,8 @@ void run(const ::tt::target::ttnn::PointToPointOp *op,
   ::ttnn::Tensor hostTensor = ::ttnn::from_device(inputTensor);
   auto targetSubmesh =
       meshDevice.create_submesh(::ttnn::MeshShape(1, 1), coord);
-  ::ttnn::Tensor deviceTensor = ::ttnn::to_device(
-      hostTensor, targetSubmesh.get(), inputTensor.memory_config());
+  ::ttnn::Tensor deviceTensor =
+      ::ttnn::to_device(hostTensor, targetSubmesh.get(), std::nullopt);
 
   //   ::ttnn::Tensor deviceTensor = inputTensor;
 
