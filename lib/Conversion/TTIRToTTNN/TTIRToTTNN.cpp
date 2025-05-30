@@ -1371,6 +1371,105 @@ public:
 } // namespace
 
 namespace {
+class AllToAllOpConversionPattern
+    : public OpConversionPattern<ttir::AllToAllOp> {
+private:
+  ::mlir::Value createEmptyTensor(ConversionPatternRewriter &rewriter,
+                                  Location loc, RankedTensorType type,
+                                  Value device) const {
+
+    ttnn::ShapeAttr shapeAttr =
+        ttnn::ShapeAttr::get(rewriter.getContext(), type.getShape());
+    ttnn::TTNNLayoutAttr layoutAttr =
+        mlir::cast<ttnn::TTNNLayoutAttr>(type.getEncoding());
+    DataTypeAttr dTypeAttr =
+        DataTypeAttr::get(rewriter.getContext(), layoutAttr.getDataType());
+    ttnn::LayoutAttr tensorLayoutAttr =
+        ttnn::LayoutAttr::get(rewriter.getContext(), ttnn::Layout::Tile);
+    ttnn::BufferTypeAttr bufferTypeAttr = ttnn::BufferTypeAttr::get(
+        rewriter.getContext(), layoutAttr.getBufferType());
+    ttnn::MemoryConfigAttr memoryConfigAttr = ttnn::MemoryConfigAttr::get(
+        rewriter.getContext(), layoutAttr.getMemLayout(), bufferTypeAttr,
+        std::nullopt);
+
+    return rewriter
+        .create<ttnn::EmptyOp>(loc, type, shapeAttr, dTypeAttr,
+                               tensorLayoutAttr, device, memoryConfigAttr)
+        .getResult();
+  }
+
+public:
+  using OpConversionPattern<ttir::AllToAllOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(ttir::AllToAllOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    Location loc = op.getLoc();
+    ::mlir::RankedTensorType inputType =
+        mlir::cast<::mlir::RankedTensorType>(adaptor.getInput().getType());
+    auto inputShape = inputType.getShape();
+    int32_t splitDim = op.getSplitDim();
+    int32_t splitCount = op.getSplitCount();
+
+    // 1. Slice
+    int32_t splitSize = inputShape[splitDim] / splitCount;
+    llvm::SmallVector<int64_t> slicedShape(inputShape.begin(),
+                                           inputShape.end());
+    slicedShape[splitDim] = splitSize;
+    RankedTensorType sliceOutputType =
+        RankedTensorType::Builder(inputType).setShape(slicedShape);
+    llvm::SmallVector<Value> sliceOpResults;
+    llvm::SmallVector<int32_t> begins(inputShape.size(), 0);
+    llvm::SmallVector<int32_t> ends(inputShape.begin(), inputShape.end());
+    llvm::SmallVector<int32_t> steps(inputShape.size(), 1);
+    for (int32_t sliceIdx = 0; sliceIdx < splitCount; sliceIdx++) {
+      begins[splitDim] = sliceIdx * splitSize;
+      ends[splitDim] = (sliceIdx + 1) * splitSize;
+
+      ttnn::SliceOp sliceOp = rewriter.create<ttnn::SliceOp>(
+          loc, sliceOutputType, adaptor.getInput(),
+          rewriter.getI32ArrayAttr(begins), rewriter.getI32ArrayAttr(ends),
+          rewriter.getI32ArrayAttr(steps));
+      sliceOpResults.push_back(sliceOp.getResult());
+    }
+    // 2. Reorganize
+    ::mlir::DenseIntElementsAttr replicaGroups = adaptor.getReplicaGroups();
+    llvm::SmallVector<mlir::Value> reorgBuffers;
+    for (int32_t i = 0; i < splitCount; i++) {
+      reorgBuffers.push_back(
+          createEmptyTensor(rewriter, loc, sliceOutputType,
+                            ::ttnn::utils::getOrInsertDevice(rewriter, op)));
+    }
+
+    auto deviceIds = replicaGroups.getValues<int64_t>();
+    size_t devicesInGroup =
+        static_cast<size_t>(replicaGroups.getType().getShape().back());
+    for (size_t gIdx = 0; gIdx < deviceIds.size();
+         gIdx += devicesInGroup) { // gIdx : group start Index
+      for (size_t idx = 0; idx < devicesInGroup; idx++) {
+        auto &senderId = deviceIds[gIdx + idx];
+        auto &reorgBuffer = reorgBuffers[idx];
+        for (size_t sIdx = 0; sIdx < sliceOpResults.size(); sIdx++) {
+          auto &receiverId = deviceIds[gIdx + sIdx];
+          reorgBuffer = rewriter.create<ttnn::PointToPointOp>(
+              loc, reorgBuffer.getType(), sliceOpResults[sIdx], senderId,
+              receiverId, reorgBuffer);
+        }
+      }
+    }
+
+    // 3. concat
+    rewriter.replaceOpWithNewOp<ttnn::ConcatOp>(
+        op, this->getTypeConverter()->convertType(op.getType()), reorgBuffers,
+        op.getConcatDim(),
+        /*memory_config=*/nullptr);
+
+    return success();
+  }
+};
+} // namespace
+
+namespace {
 class ArangeOpConversionPattern : public OpConversionPattern<ttir::ArangeOp> {
 public:
   using OpConversionPattern<ttir::ArangeOp>::OpConversionPattern;
@@ -1621,6 +1720,7 @@ void populateTTIRToTTNNPatterns(MLIRContext *ctx, RewritePatternSet &patterns,
            AllGatherOpConversionPattern,
            ReduceScatterOpConversionPattern,
            CollectivePermuteOpConversionPattern,
+           AllToAllOpConversionPattern,
            ArangeOpConversionPattern,
            UpdateCacheOpConversionPattern,
            FillCacheOpConversionPattern,
