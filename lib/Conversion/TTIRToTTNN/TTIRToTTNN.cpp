@@ -1397,6 +1397,14 @@ public:
   LogicalResult
   matchAndRewrite(ttir::AllToAllOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
+    auto device = ::ttnn::utils::getOrInsertDevice(rewriter, op);
+
+    rewriter.replaceOpWithNewOp<ttnn::AllToAllOp>(
+        op, this->getTypeConverter()->convertType(op.getType()),
+        adaptor.getInput(), device, adaptor.getSplitDim(),
+        adaptor.getConcatDim(), adaptor.getSplitCount(), 0);
+
+#if 0
     ::mlir::RankedTensorType inputType =
         mlir::cast<::mlir::RankedTensorType>(adaptor.getInput().getType());
     auto inputShape = inputType.getShape();
@@ -1502,6 +1510,7 @@ public:
         op, this->getTypeConverter()->convertType(op.getType()), inputs,
         concatDim,
         /*memory_config=*/nullptr);
+#endif
     return success();
   }
 };

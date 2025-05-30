@@ -4,9 +4,6 @@
 
 #include "operations/ccl/all_to_all.h"
 #include "tt/runtime/detail/logger.h"
-#include "tt/runtime/detail/ttnn/operations/utils.h"
-#include "tt/runtime/detail/ttnn/ttnn.h"
-#include "tt/runtime/detail/ttnn/utils.h"
 #include "ttnn/operations/data_movement/slice/slice.hpp"
 
 /*
@@ -32,6 +29,8 @@ void run(const ::tt::target::ttnn::AllToAllOp *op, ProgramContext &context) {
   const int32_t concatDim = op->concat_dim();
   const uint32_t splitCount = op->split_count();
   const uint32_t clusterAxis = op->cluster_axis();
+  (void)concatDim;
+  (void)clusterAxis;
 
   const auto meshShape = meshDevice->shape();
   const auto inputShape = inputTensor.logical_shape();
@@ -39,6 +38,38 @@ void run(const ::tt::target::ttnn::AllToAllOp *op, ProgramContext &context) {
              "Input dimension along splitDim must be divisible by splitCount");
 
   const uint32_t splitSize = inputShape[splitDim] / splitCount;
+  std::vector<std::vector<::ttnn::Tensor>> gatheredTensorsSharded(
+      splitCount, std::vector<::ttnn::Tensor>(meshDevice->num_devices()));
+  auto steps = ::ttnn::SmallVector<int32_t>(inputShape.rank(), 1);
+  for (size_t sliceIdx = 0; sliceIdx < splitCount; sliceIdx++) {
+    ::ttnn::SmallVector<int32_t> begins(inputShape.size(), 0);
+    ::ttnn::SmallVector<int32_t> ends(inputShape.cbegin(), inputShape.cend());
+    begins[splitDim] = sliceIdx * splitSize;
+    ends[splitDim] = (sliceIdx + 1) * splitSize;
+    ::ttnn::Tensor slice_device =
+        ::ttnn::slice(inputTensor, begins, ends, steps); // device
+    // ::ttnn::Tensor slice_device = inputTensor;
+    std::vector<::ttnn::Tensor> deviceTensors =
+        ::ttnn::distributed::get_device_tensors(slice_device);
+
+    for (size_t idx = 0; idx < deviceTensors.size(); idx++) {
+      LOG_DEBUG("TESTING IDX : ", idx);
+      LOG_DEBUG("Pulling tensor");
+      ::ttnn::Tensor hostTensor = ::ttnn::from_device(deviceTensors[idx]);
+      LOG_DEBUG("Creating submesh");
+      int32_t x = idx / 4;
+      int32_t y = idx % 4;
+      auto targetSubmesh = meshDevice->create_submesh(
+          ::ttnn::MeshShape(1, 1), ::ttnn::MeshCoordinate(x, y));
+      auto id = targetSubmesh->get_device(::ttnn::MeshCoordinate(0, 0))->id();
+      LOG_DEBUG("target device ID :", id, " (", x, ",", y, ")");
+      LOG_DEBUG("Pushing tensor");
+      ::ttnn::Tensor deviceTensor =
+          ::ttnn::to_device(hostTensor, targetSubmesh.get(), std::nullopt);
+    }
+  }
+
+#if 0
 
   // 1. Slice the input tensor on-device and materialize per-device host copies.
   //    slicedTensorsMulti[sliceIdx][device_idx]
@@ -102,7 +133,8 @@ void run(const ::tt::target::ttnn::AllToAllOp *op, ProgramContext &context) {
 
   // 4. Concatenate along the requested dimension and register output.
   ::ttnn::Tensor output = ::ttnn::concat(gatheredTensorsMulti, concatDim);
-
+#endif
+  ::ttnn::Tensor output = inputTensor;
   tensorPool.insertTTNNTensorAndValidate(op->out(), output);
 }
 } // namespace tt::runtime::ttnn::operations::ccl
