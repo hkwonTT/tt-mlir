@@ -4,7 +4,9 @@
 
 #include "operations/ccl/all_to_all.h"
 #include "tt/runtime/detail/logger.h"
+#include "tt/runtime/detail/ttnn/utils.h"
 #include "ttnn/operations/data_movement/slice/slice.hpp"
+#include <ttnn/distributed/api.hpp>
 
 /*
 TTNN does not yet expose an All-to-All collective as a first-class API,
@@ -22,6 +24,35 @@ void run(const ::tt::target::ttnn::AllToAllOp *op, ProgramContext &context) {
   const ::ttnn::Tensor &inputTensor =
       tensorPool.getTTNNTensorAndValidate(op->in());
 
+  // ::ttnn::MeshDevice &meshDevice = context.getMeshDevice();
+
+  LOG_DEBUG("cos");
+  auto tensor0 = ::ttnn::cos(inputTensor);
+  LOG_DEBUG("get_device_tensors");
+  auto deviceTensors = ::ttnn::distributed::get_device_tensors(tensor0);
+  std::vector<std::shared_ptr<::ttnn::MeshDevice>> targetMeshes(
+      deviceTensors.size());
+  for (size_t idx = 0; idx < deviceTensors.size(); idx++) {
+    targetMeshes[idx] =
+        context.getUnitMeshDevice(deviceTensors.size() - idx - 1);
+  }
+
+  for (size_t idx = 0; idx < deviceTensors.size(); idx++) {
+    LOG_DEBUG("TESTING IDX : ", idx);
+    // auto submesh = meshDevice.create_submesh(::ttnn::MeshShape(1, 1),
+    // ::ttnn::MeshCoordinate(0, 0));
+    auto deviceTensor = deviceTensors[idx];
+    LOG_DEBUG("from_device");
+    auto hostTensor =
+        ::ttnn::from_device(deviceTensor, true, ::ttnn::DefaultQueueId);
+    LOG_DEBUG("to_device");
+    auto movedTensor =
+        ::ttnn::to_device(hostTensor, targetMeshes[idx].get(),
+                          ::ttnn::DRAM_MEMORY_CONFIG, ::ttnn::DefaultQueueId);
+  }
+  LOG_DEBUG("End of Testing");
+
+#if 0
   ::ttnn::MeshDevice *meshDevice = inputTensor.mesh_device();
   LOG_ASSERT(meshDevice != nullptr, "Tensor must belong to a mesh device");
 
@@ -42,20 +73,25 @@ void run(const ::tt::target::ttnn::AllToAllOp *op, ProgramContext &context) {
       splitCount, std::vector<::ttnn::Tensor>(meshDevice->num_devices()));
   auto steps = ::ttnn::SmallVector<int32_t>(inputShape.rank(), 1);
   for (size_t sliceIdx = 0; sliceIdx < splitCount; sliceIdx++) {
+#if 0
     ::ttnn::SmallVector<int32_t> begins(inputShape.size(), 0);
     ::ttnn::SmallVector<int32_t> ends(inputShape.cbegin(), inputShape.cend());
     begins[splitDim] = sliceIdx * splitSize;
     ends[splitDim] = (sliceIdx + 1) * splitSize;
     ::ttnn::Tensor slice_device =
-        ::ttnn::slice(inputTensor, begins, ends, steps); // device
-    // ::ttnn::Tensor slice_device = inputTensor;
+        ::ttnn::slice(::ttnn::DefaultQueueId, inputTensor, begins, ends, steps, ::ttnn::DRAM_MEMORY_CONFIG); // device
+#else
+  (void) splitSize;
+  ::ttnn::Tensor slice_device = ::ttnn::cos(inputTensor);
+  // ::ttnn::Tensor slice_device = inputTensor;
+#endif
     std::vector<::ttnn::Tensor> deviceTensors =
         ::ttnn::distributed::get_device_tensors(slice_device);
 
     for (size_t idx = 0; idx < deviceTensors.size(); idx++) {
       LOG_DEBUG("TESTING IDX : ", idx);
-      LOG_DEBUG("Pulling tensor");
-      ::ttnn::Tensor hostTensor = ::ttnn::from_device(deviceTensors[idx]);
+      LOG_DEBUG("MeshDevice shape => (", meshDevice->shape()[0], ",", meshDevice->shape()[1], ")");
+
       LOG_DEBUG("Creating submesh");
       int32_t x = idx / 4;
       int32_t y = idx % 4;
@@ -63,10 +99,18 @@ void run(const ::tt::target::ttnn::AllToAllOp *op, ProgramContext &context) {
           ::ttnn::MeshShape(1, 1), ::ttnn::MeshCoordinate(x, y));
       auto id = targetSubmesh->get_device(::ttnn::MeshCoordinate(0, 0))->id();
       LOG_DEBUG("target device ID :", id, " (", x, ",", y, ")");
+      LOG_DEBUG("MeshDevice shape => (", meshDevice->shape()[0], ",", meshDevice->shape()[1], ")");
+      LOG_DEBUG("targetSubmesh shape => (", targetSubmesh->shape()[0], ",", targetSubmesh->shape()[1], ")");
+
+      LOG_DEBUG("Pulling tensor");
+      ::ttnn::Tensor hostTensor = ::ttnn::from_device(deviceTensors[idx], true);
+      LOG_DEBUG("Pulling tensor2");
       LOG_DEBUG("Pushing tensor");
       ::ttnn::Tensor deviceTensor =
-          ::ttnn::to_device(hostTensor, targetSubmesh.get(), std::nullopt);
+          ::ttnn::to_device(hostTensor, targetSubmesh.get(), ::ttnn::DRAM_MEMORY_CONFIG);
+      LOG_DEBUG("Done TESTING IDX : ", idx);
     }
+    LOG_DEBUG("Done TESTING SLICE : ", sliceIdx);
   }
 
 #if 0
@@ -134,6 +178,8 @@ void run(const ::tt::target::ttnn::AllToAllOp *op, ProgramContext &context) {
   // 4. Concatenate along the requested dimension and register output.
   ::ttnn::Tensor output = ::ttnn::concat(gatheredTensorsMulti, concatDim);
 #endif
+#endif
+  LOG_DEBUG("End of AllToAll");
   ::ttnn::Tensor output = inputTensor;
   tensorPool.insertTTNNTensorAndValidate(op->out(), output);
 }
