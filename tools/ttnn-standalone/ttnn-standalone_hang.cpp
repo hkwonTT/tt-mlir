@@ -6,26 +6,16 @@
 
 ttnn::Tensor testingHangFunction(ttnn::Tensor tensor, std::shared_ptr<ttnn::distributed::MeshDevice> meshDevice) {
   ttnn::Tensor tensor0 = ttnn::cos(tensor);
-
-  std::vector<std::shared_ptr<ttnn::distributed::MeshDevice>> targetSubmeshes; // store submesh to avoid deconstruction
-
   std::vector<ttnn::Tensor> deviceTensors = ttnn::distributed::get_device_tensors(tensor0);
-  std::vector<ttnn::Tensor> reorgTensors(deviceTensors.size());
+  std::vector<ttnn::Tensor> reorgTensors(meshDevice->num_devices());
   for (size_t i = 0; i < deviceTensors.size(); i++)
   {
-    std::cout << "Reorganizing tensor from Device #" << i << std::endl;
-    auto hostTensor = ttnn::from_device(deviceTensors[i]);
-    std::cout << "Creating unit submesh of Device #" << deviceTensors.size() - i - 1 << std::endl;
+    auto hostTensor = ttnn::from_device(deviceTensors[i]);  // hangs here at second round
     auto targetDevice = meshDevice->create_submesh(ttnn::MeshShape(1, 1), ttnn::MeshCoordinate(0, deviceTensors.size() - i - 1));
-    targetSubmeshes.push_back(targetDevice); // store submesh to avoid deconstruction
-    std::cout << "Pushing tensor to Device #" << targetDevice->build_id() << std::endl;
-    reorgTensors[targetDevice->build_id()] = ttnn::to_device(hostTensor, targetDevice.get(), std::nullopt);
+    reorgTensors[targetDevice->build_id()] = ttnn::to_device(hostTensor, meshDevice.get(), std::nullopt);
   }
-  std::cout << "Cleaning up submeshes" << std::endl;
-  targetSubmeshes.clear();  // This will deconstruct the submeshes. It may cause an exception.
-  std::cout << "Aggregating single device tensors as a sharded multi device Tensor" << std::endl;
-  // ttnn::Tensor shardedTensor = ttnn::distributed::aggregate_as_tensor(reorgTensors, tensor.distributed_tensor_config());
-  return tensor;
+  ttnn::Tensor shardedTensor = ttnn::distributed::aggregate_as_tensor(reorgTensors, tensor.distributed_tensor_config());
+  return shardedTensor;
 }
 
 
@@ -81,7 +71,6 @@ void testingHangCase(std::shared_ptr<ttnn::distributed::MeshDevice> meshDevice) 
   ttnn::Tensor shardedOutput = testingHangFunction(shardedInput, meshDevice);
   ttnn::Tensor outputTensor = unshardTensor(shardedOutput, meshDevice);
 }
-
 
 int32_t main() {
   std::shared_ptr<ttnn::distributed::MeshDevice> meshDevice = openMeshDevice();
