@@ -28,14 +28,7 @@ void run(const ::tt::target::ttnn::AllToAllOp *op, ProgramContext &context) {
 
   LOG_DEBUG("cos");
   auto tensor0 = ::ttnn::cos(inputTensor);
-  LOG_DEBUG("get_device_tensors");
   auto deviceTensors = ::ttnn::distributed::get_device_tensors(tensor0);
-  std::vector<std::shared_ptr<::ttnn::MeshDevice>> targetMeshes(
-      deviceTensors.size());
-  for (size_t idx = 0; idx < deviceTensors.size(); idx++) {
-    targetMeshes[idx] =
-        context.getUnitMeshDevice(deviceTensors.size() - idx - 1);
-  }
 
   for (size_t idx = 0; idx < deviceTensors.size(); idx++) {
     LOG_DEBUG("TESTING IDX : ", idx);
@@ -46,9 +39,10 @@ void run(const ::tt::target::ttnn::AllToAllOp *op, ProgramContext &context) {
     auto hostTensor =
         ::ttnn::from_device(deviceTensor, true, ::ttnn::DefaultQueueId);
     LOG_DEBUG("to_device");
-    auto movedTensor =
-        ::ttnn::to_device(hostTensor, targetMeshes[idx].get(),
-                          ::ttnn::DRAM_MEMORY_CONFIG, ::ttnn::DefaultQueueId);
+    auto movedTensor = ::ttnn::to_device(
+        hostTensor,
+        context.getUnitMeshDevice(deviceTensors.size() - idx - 1).get(),
+        ::ttnn::DRAM_MEMORY_CONFIG, ::ttnn::DefaultQueueId);
   }
   LOG_DEBUG("End of Testing");
 
