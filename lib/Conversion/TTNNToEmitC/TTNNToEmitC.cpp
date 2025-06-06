@@ -2056,20 +2056,20 @@ public:
 };
 } // namespace
 
-// AggregateAsTensorOp conversion pattern
+// AggregateShardsOp conversion pattern
 //
 namespace {
-class AggregateAsTensorOpConversionPattern
-    : public TTNNToEmitCBaseOpConversionPattern<tt::ttnn::AggregateAsTensorOp> {
+class AggregateShardsOpConversionPattern
+    : public TTNNToEmitCBaseOpConversionPattern<tt::ttnn::AggregateShardsOp> {
 public:
   using TTNNToEmitCBaseOpConversionPattern<
-      tt::ttnn::AggregateAsTensorOp>::TTNNToEmitCBaseOpConversionPattern;
+      tt::ttnn::AggregateShardsOp>::TTNNToEmitCBaseOpConversionPattern;
 
   LogicalResult
-  matchAndRewrite(tt::ttnn::AggregateAsTensorOp srcOp,
-                  tt::ttnn::AggregateAsTensorOp::Adaptor adaptor,
+  matchAndRewrite(tt::ttnn::AggregateShardsOp srcOp,
+                  tt::ttnn::AggregateShardsOp::Adaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    ttnn_to_emitc::EmitCTTNNEmitter<tt::ttnn::AggregateAsTensorOp> emitter(
+    ttnn_to_emitc::EmitCTTNNEmitter<tt::ttnn::AggregateShardsOp> emitter(
         srcOp, adaptor, rewriter);
 
     llvm::SmallVector<mlir::Attribute> args{
@@ -2274,7 +2274,7 @@ void populateTTNNToEmitCPatterns(mlir::MLIRContext *ctx,
   patterns.add<CollectivePermuteOpConversionPattern>(typeConverter, ctx);
   patterns.add<MeshShardOpConversionPattern>(typeConverter, ctx);
   patterns.add<ExtractShardsOpConversionPattern>(typeConverter, ctx);
-  patterns.add<AggregateAsTensorOpConversionPattern>(typeConverter, ctx);
+  patterns.add<AggregateShardsOpConversionPattern>(typeConverter, ctx);
 
   // KV Cache ops
   //

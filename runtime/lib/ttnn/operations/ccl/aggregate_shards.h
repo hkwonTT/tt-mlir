@@ -2,15 +2,15 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-#ifndef RUNTIME_LIB_TTNN_OPERATIONS_CCL_AGGREGATE_AS_TENSOR_H
-#define RUNTIME_LIB_TTNN_OPERATIONS_CCL_AGGREGATE_AS_TENSOR_H
+#ifndef RUNTIME_LIB_TTNN_OPERATIONS_CCL_AGGREGATE_SHARDS_H
+#define RUNTIME_LIB_TTNN_OPERATIONS_CCL_AGGREGATE_SHARDS_H
 
 #include "tt/runtime/detail/ttnn/types.h"
 #include "ttmlir/Target/TTNN/program_generated.h"
 
 namespace tt::runtime::ttnn::operations::ccl {
-void run(const ::tt::target::ttnn::AggregateAsTensorOp *op,
+void run(const ::tt::target::ttnn::AggregateShardsOp *op,
          ProgramContext &context);
 } // namespace tt::runtime::ttnn::operations::ccl
 
-#endif // RUNTIME_LIB_TTNN_OPERATIONS_CCL_AGGREGATE_AS_TENSOR_H
+#endif // RUNTIME_LIB_TTNN_OPERATIONS_CCL_AGGREGATE_SHARDS_H

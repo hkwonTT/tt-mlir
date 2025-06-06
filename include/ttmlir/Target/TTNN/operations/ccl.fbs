@@ -43,7 +43,7 @@ table ExtractShardsOp {
   out: [tt.target.ttnn.TensorRef];
 }
 
-table AggregateAsTensorOp {
+table AggregateShardsOp {
   inputs: [tt.target.ttnn.TensorRef];
   out: tt.target.ttnn.TensorRef;
   config: DistributionStrategy;

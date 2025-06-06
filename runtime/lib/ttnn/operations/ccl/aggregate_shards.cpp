@@ -2,14 +2,14 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-#include "operations/ccl/aggregate_as_tensor.h"
+#include "operations/ccl/aggregate_shards.h"
 #include "tt/runtime/detail/logger.h"
 #include "tt/runtime/detail/ttnn/operations/utils.h"
 #include "tt/runtime/detail/ttnn/ttnn.h"
 #include "tt/runtime/detail/ttnn/utils.h"
 
 namespace tt::runtime::ttnn::operations::ccl {
-void run(const ::tt::target::ttnn::AggregateAsTensorOp *op,
+void run(const ::tt::target::ttnn::AggregateShardsOp *op,
          ProgramContext &context) {
   ProgramTensorPool &tensorPool = context.getTensorPool();
   std::vector<::ttnn::Tensor> inputs;

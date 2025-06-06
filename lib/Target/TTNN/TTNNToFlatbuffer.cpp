@@ -755,8 +755,8 @@ createOp(FlatbufferObjectCache &cache, ExtractShardsOp op) {
                                                    outputsVec);
 }
 
-::flatbuffers::Offset<::tt::target::ttnn::AggregateAsTensorOp>
-createOp(FlatbufferObjectCache &cache, AggregateAsTensorOp op) {
+::flatbuffers::Offset<::tt::target::ttnn::AggregateShardsOp>
+createOp(FlatbufferObjectCache &cache, AggregateShardsOp op) {
 
   std::vector<::flatbuffers::Offset<::tt::target::ttnn::TensorRef>> ins;
   for (auto input : op.getInputs()) {
@@ -773,8 +773,8 @@ createOp(FlatbufferObjectCache &cache, AggregateAsTensorOp op) {
       *cache.fbb,
       ::mlir::tt::ttnn::utils::toTargetDistributedTensorConfig(op.getConfig()));
 
-  return ::tt::target::ttnn::CreateAggregateAsTensorOpDirect(*cache.fbb, &ins,
-                                                             out, strategy);
+  return ::tt::target::ttnn::CreateAggregateShardsOpDirect(*cache.fbb, &ins,
+                                                           out, strategy);
 }
 
 ::flatbuffers::Offset<::tt::target::ttnn::PermuteOp>
@@ -2120,9 +2120,9 @@ emitTTNNOperation(FlatbufferObjectCache &cache, Operation *op,
     return createOperation(cache, createOp(cache, extractShardsOp), debugString,
                            locInfo);
   }
-  if (auto aggregateAsTensorOp = dyn_cast<AggregateAsTensorOp>(op);
-      aggregateAsTensorOp) {
-    return createOperation(cache, createOp(cache, aggregateAsTensorOp),
+  if (auto aggregateShardsOp = dyn_cast<AggregateShardsOp>(op);
+      aggregateShardsOp) {
+    return createOperation(cache, createOp(cache, aggregateShardsOp),
                            debugString, locInfo);
   }
 

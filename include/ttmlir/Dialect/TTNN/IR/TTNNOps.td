@@ -2054,7 +2054,7 @@ def TTNN_ExtractShardsOp : TTNN_Op<"extract_shards"> {
   let results = (outs Variadic<AnyRankedTensor>:$outputs);
 }
 
-def TTNN_AggregateAsTensorOp : TTNN_Op<"aggregate_as_tensor"> {
+def TTNN_AggregateShardsOp : TTNN_Op<"aggregate_shards"> {
   let summary = "Aggregates single-device tensors into a multi-device sharded tensor.";
   let description = [{
     This operation takes a list of single-device tensors and aggregates them into a single
