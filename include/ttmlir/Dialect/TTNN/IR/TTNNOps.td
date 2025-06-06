@@ -2029,4 +2029,29 @@ def TTNN_RequantizeOp : TTNN_Op<"requantize"> {
 
     let hasVerifier = 1;
 }
+
+def TTNN_GetDeviceTensorsOp : TTNN_Op<"get_device_tensors"> {
+  let summary = "Extracts a multi-device sharded tensor into multiple single-device tensors.";
+  let description = [{
+    Given a multi-device sharded tensor, this operation returns a list of individual single-device tensors,
+    typically one tensor per device. Each single-device tensor corresponds to the data partition that was assigned
+    to that device during sharding.
+
+    Internally, this operation leverages the `tnn::get_device_tensors` API. This API efficiently
+    extracts per-device tensor views from the sharded tensor.
+
+    Input:
+      - A single multi-device sharded tensor representing the logically partitioned data across devices.
+
+    Output:
+      - A variadic list of single-device tensors, each corresponding to one device's partition of the input tensor.
+
+    This operation is useful for enabling device-specific processing after initially distributing data
+    across multiple devices in a parallel computing environment.
+  }];
+
+  let arguments = (ins AnyRankedTensor:$input);
+  let results = (outs Variadic<AnyRankedTensor>:$outputs);
+}
+
 #endif

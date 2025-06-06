@@ -738,6 +738,22 @@ createOp(FlatbufferObjectCache &cache, MeshShardOp op) {
       cache.fbb->CreateVector<int64_t>(shardShape),
       cache.fbb->CreateVector<int64_t>(shardDims));
 }
+::flatbuffers::Offset<::tt::target::ttnn::GetDeviceTensorsOp>
+createOp(FlatbufferObjectCache &cache, GetDeviceTensorsOp op) {
+  auto input = cache.at<::tt::target::ttnn::TensorRef>(
+      getOperandThroughDPSOps(op.getInput()));
+
+  std::vector<flatbuffers::Offset<::tt::target::ttnn::TensorRef>> outputs;
+  for (auto output : op.getOutputs()) {
+    outputs.push_back(
+        cache.getOrCreate(output, tensorValueToFlatbuffer, kHostAllocatedSize));
+  }
+
+  auto outputsVec = cache.fbb->CreateVector(outputs);
+
+  return ::tt::target::ttnn::CreateGetDeviceTensorsOp(*cache.fbb, input,
+                                                      outputsVec);
+}
 
 ::flatbuffers::Offset<::tt::target::ttnn::PermuteOp>
 createOp(FlatbufferObjectCache &cache, PermuteOp op) {
@@ -2076,6 +2092,11 @@ emitTTNNOperation(FlatbufferObjectCache &cache, Operation *op,
   if (auto loadCachedOp = dyn_cast<tt::LoadCachedOp>(op); loadCachedOp) {
     return createOperation(cache,
                            createOp(cache, loadCachedOp, programIndexMap),
+                           debugString, locInfo);
+  }
+  if (auto getDeviceTensorsOp = dyn_cast<GetDeviceTensorsOp>(op);
+      getDeviceTensorsOp) {
+    return createOperation(cache, createOp(cache, getDeviceTensorsOp),
                            debugString, locInfo);
   }
 

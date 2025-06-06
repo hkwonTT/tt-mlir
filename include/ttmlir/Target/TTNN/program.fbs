@@ -75,7 +75,8 @@ union OpType {
   ReductionOp,
   ReductionProdOp,
   LoadCachedOp,
-  BatchNormOp
+  BatchNormOp,
+  GetDeviceTensorsOp,
 }
 
 table Operation {
