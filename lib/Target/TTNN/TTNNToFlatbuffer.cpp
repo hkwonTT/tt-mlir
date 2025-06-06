@@ -738,6 +738,44 @@ createOp(FlatbufferObjectCache &cache, MeshShardOp op) {
       cache.fbb->CreateVector<int64_t>(shardShape),
       cache.fbb->CreateVector<int64_t>(shardDims));
 }
+::flatbuffers::Offset<::tt::target::ttnn::ExtractShardsOp>
+createOp(FlatbufferObjectCache &cache, ExtractShardsOp op) {
+  auto input = cache.at<::tt::target::ttnn::TensorRef>(
+      getOperandThroughDPSOps(op.getInput()));
+
+  std::vector<flatbuffers::Offset<::tt::target::ttnn::TensorRef>> outputs;
+  for (auto output : op.getOutputs()) {
+    outputs.push_back(
+        cache.getOrCreate(output, tensorValueToFlatbuffer, kHostAllocatedSize));
+  }
+
+  auto outputsVec = cache.fbb->CreateVector(outputs);
+
+  return ::tt::target::ttnn::CreateExtractShardsOp(*cache.fbb, input,
+                                                   outputsVec);
+}
+
+::flatbuffers::Offset<::tt::target::ttnn::AggregateShardsOp>
+createOp(FlatbufferObjectCache &cache, AggregateShardsOp op) {
+
+  std::vector<::flatbuffers::Offset<::tt::target::ttnn::TensorRef>> ins;
+  for (auto input : op.getInputs()) {
+    ins.push_back(cache.at<::tt::target::ttnn::TensorRef>(
+        getOperandThroughDPSOps(input)));
+  }
+
+  auto outputType = op.getResult();
+  auto out = cache.getOrCreate(outputType, tensorValueToFlatbuffer,
+                               kHostAllocatedSize);
+  // ::tt::target::ttnn::DistributionStrategy strategy;
+
+  auto strategy = ::tt::target::ttnn::CreateDistributionStrategy(
+      *cache.fbb,
+      ::mlir::tt::ttnn::utils::toTargetDistributedTensorConfig(op.getConfig()));
+
+  return ::tt::target::ttnn::CreateAggregateShardsOpDirect(*cache.fbb, &ins,
+                                                           out, strategy);
+}
 
 ::flatbuffers::Offset<::tt::target::ttnn::PermuteOp>
 createOp(FlatbufferObjectCache &cache, PermuteOp op) {
@@ -2076,6 +2114,15 @@ emitTTNNOperation(FlatbufferObjectCache &cache, Operation *op,
   if (auto loadCachedOp = dyn_cast<tt::LoadCachedOp>(op); loadCachedOp) {
     return createOperation(cache,
                            createOp(cache, loadCachedOp, programIndexMap),
+                           debugString, locInfo);
+  }
+  if (auto extractShardsOp = dyn_cast<ExtractShardsOp>(op); extractShardsOp) {
+    return createOperation(cache, createOp(cache, extractShardsOp), debugString,
+                           locInfo);
+  }
+  if (auto aggregateShardsOp = dyn_cast<AggregateShardsOp>(op);
+      aggregateShardsOp) {
+    return createOperation(cache, createOp(cache, aggregateShardsOp),
                            debugString, locInfo);
   }
 

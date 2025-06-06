@@ -2029,4 +2029,58 @@ def TTNN_RequantizeOp : TTNN_Op<"requantize"> {
 
     let hasVerifier = 1;
 }
+
+def TTNN_ExtractShardsOp : TTNN_Op<"extract_shards"> {
+  let summary = "Extracts a multi-device sharded tensor into multiple single-device tensors.";
+  let description = [{
+    Given a multi-device sharded tensor, this operation returns a list of individual single-device tensors,
+    typically one tensor per device. Each single-device tensor corresponds to the data partition that was assigned
+    to that device during sharding.
+
+    Internally, this operation leverages the `tnn::get_device_tensors` API. This API efficiently
+    extracts per-device tensor views from the sharded tensor.
+
+    Input:
+      - A single multi-device sharded tensor representing the logically partitioned data across devices.
+
+    Output:
+      - A variadic list of single-device tensors, each corresponding to one device's partition of the input tensor.
+
+    This operation is useful for enabling device-specific processing after initially distributing data
+    across multiple devices in a parallel computing environment.
+  }];
+
+  let arguments = (ins AnyRankedTensor:$input);
+  let results = (outs Variadic<AnyRankedTensor>:$outputs);
+}
+
+def TTNN_AggregateShardsOp : TTNN_Op<"aggregate_shards"> {
+  let summary = "Aggregates single-device tensors into a multi-device sharded tensor.";
+  let description = [{
+    This operation takes a list of single-device tensors and aggregates them into a single
+    multi-device sharded tensor. Each input tensor represents a partition of the data that
+    was previously extracted from a multi-device tensor or generated on a single device.
+
+    Internally, this operation leverages the `tnn::aggregate_as_tensor` API to combine the
+    device-specific tensors into a unified multi-device tensor representation.
+
+    Input:
+      - A variadic list of single-device tensors. Each tensor typically corresponds to the data
+        partition assigned to one device during sharding.
+      - A configuration attribute (`config`) that represents `::tt::tt_metal::DistributedTensorConfig`.
+
+    Output:
+      - A single multi-device sharded tensor that logically combines the per-device data
+        into a unified tensor for further distributed computation.
+
+    This operation is useful for consolidating the results of per-device processing back into
+    a single logical tensor that can participate in subsequent multi-device operations.
+  }];
+
+  let arguments = (ins Variadic<AnyRankedTensor>:$inputs,
+                  TTNN_DistributedTensorConfigAttr:$config);
+  let results = (outs AnyRankedTensor:$output);
+  let hasVerifier = 1;
+}
+
 #endif

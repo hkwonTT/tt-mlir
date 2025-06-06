@@ -93,6 +93,24 @@ inline ::tt::target::DataType toTargetDataType(::mlir::tt::DataType dataType) {
   llvm_unreachable("Unsupported DataType");
 }
 
+inline ::tt::target::ttnn::DistributedTensorConfig
+toTargetDistributedTensorConfig(
+    ::mlir::tt::ttnn::DistributedTensorConfig tensorMemoryLayout) {
+
+  switch (tensorMemoryLayout) {
+  case ::mlir::tt::ttnn::DistributedTensorConfig::ReplicateTensor:
+    return ::tt::target::ttnn::DistributedTensorConfig::ReplicateTensor;
+  case ::mlir::tt::ttnn::DistributedTensorConfig::ShardTensor:
+    return ::tt::target::ttnn::DistributedTensorConfig::ShardTensor;
+  case ::mlir::tt::ttnn::DistributedTensorConfig::ShardTensor2D:
+    return ::tt::target::ttnn::DistributedTensorConfig::ShardTensor2D;
+  case ::mlir::tt::ttnn::DistributedTensorConfig::AllGatherTensor:
+    return ::tt::target::ttnn::DistributedTensorConfig::AllGatherTensor;
+  }
+
+  llvm_unreachable("Unsupported TensorMemoryLayout");
+}
+
 } // namespace mlir::tt::ttnn::utils
 
 #endif // TTMLIR_TARGET_TTNN_UTILS_H

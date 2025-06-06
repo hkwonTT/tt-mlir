@@ -2030,6 +2030,59 @@ public:
 };
 } // namespace
 
+// ExtractShardsOp conversion pattern
+//
+namespace {
+class ExtractShardsOpConversionPattern
+    : public TTNNToEmitCBaseOpConversionPattern<tt::ttnn::ExtractShardsOp> {
+public:
+  using TTNNToEmitCBaseOpConversionPattern<
+      tt::ttnn::ExtractShardsOp>::TTNNToEmitCBaseOpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(tt::ttnn::ExtractShardsOp srcOp,
+                  tt::ttnn::ExtractShardsOp::Adaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    ttnn_to_emitc::EmitCTTNNEmitter<tt::ttnn::ExtractShardsOp> emitter(
+        srcOp, adaptor, rewriter);
+
+    llvm::SmallVector<mlir::Attribute> args{
+        emitter.emit(srcOp.getInput()),
+    };
+
+    emitter.replaceOp(*this, args);
+    return success();
+  }
+};
+} // namespace
+
+// AggregateShardsOp conversion pattern
+//
+namespace {
+class AggregateShardsOpConversionPattern
+    : public TTNNToEmitCBaseOpConversionPattern<tt::ttnn::AggregateShardsOp> {
+public:
+  using TTNNToEmitCBaseOpConversionPattern<
+      tt::ttnn::AggregateShardsOp>::TTNNToEmitCBaseOpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(tt::ttnn::AggregateShardsOp srcOp,
+                  tt::ttnn::AggregateShardsOp::Adaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    ttnn_to_emitc::EmitCTTNNEmitter<tt::ttnn::AggregateShardsOp> emitter(
+        srcOp, adaptor, rewriter);
+
+    llvm::SmallVector<mlir::Attribute> args{
+        emitter.emit(srcOp.getInputs()),
+        // emitter.emit(srcOp.getConfig()),
+    };
+
+    emitter.replaceOp(*this, args);
+    return success();
+  }
+};
+} // namespace
+
 // PermuteOp conversion pattern
 //
 namespace {
@@ -2220,6 +2273,8 @@ void populateTTNNToEmitCPatterns(mlir::MLIRContext *ctx,
   patterns.add<ReduceScatterOpConversionPattern>(typeConverter, ctx);
   patterns.add<CollectivePermuteOpConversionPattern>(typeConverter, ctx);
   patterns.add<MeshShardOpConversionPattern>(typeConverter, ctx);
+  patterns.add<ExtractShardsOpConversionPattern>(typeConverter, ctx);
+  patterns.add<AggregateShardsOpConversionPattern>(typeConverter, ctx);
 
   // KV Cache ops
   //

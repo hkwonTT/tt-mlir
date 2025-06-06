@@ -38,3 +38,13 @@ table ReduceScatterOp {
   cluster_axis: uint32;
   num_links: uint32;
 }
+table ExtractShardsOp {
+  in: tt.target.ttnn.TensorRef;
+  out: [tt.target.ttnn.TensorRef];
+}
+
+table AggregateShardsOp {
+  inputs: [tt.target.ttnn.TensorRef];
+  out: tt.target.ttnn.TensorRef;
+  config: DistributionStrategy;
+}

@@ -2161,6 +2161,19 @@ mlir::tt::ttnn::CollectivePermuteOp::fold(FoldAdaptor adaptor) {
 }
 
 //===----------------------------------------------------------------------===//
+// AggregateShardsOp
+//===----------------------------------------------------------------------===//
+
+::mlir::LogicalResult mlir::tt::ttnn::AggregateShardsOp::verify() {
+  mlir::OperandRange inputs = getInputs();
+  if (inputs.empty()) {
+    return emitOpError(
+        "AggregateShardsOp must have at least one input operand");
+  }
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
 // UpdateCacheOp
 //===----------------------------------------------------------------------===//
 

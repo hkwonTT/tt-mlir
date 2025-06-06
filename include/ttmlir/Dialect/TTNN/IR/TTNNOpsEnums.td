@@ -77,6 +77,23 @@ def TTNN_ReduceType: I32EnumAttr<"ReduceType", "TTNN Reduce Operation Type",
   let cppNamespace = "::mlir::tt::ttnn::operations::reduction";
 }
 
+def TTNN_DistributedTensorConfig_ReplicateTensor : I32EnumAttrCase<"ReplicateTensor",  0, "replicate_tensor">;
+def TTNN_DistributedTensorConfig_ShardTensor : I32EnumAttrCase<"ShardTensor",  1, "shard_tensor">;
+def TTNN_DistributedTensorConfig_ShardTensor2D : I32EnumAttrCase<"ShardTensor2D",  2, "shard_tensor_2d">;
+def TTNN_DistributedTensorConfig_AllGatherTensor : I32EnumAttrCase<"AllGatherTensor",  3, "all_gather_tensor">;
+
+
+def TTNN_DistributedTensorConfig: I32EnumAttr<"DistributedTensorConfig", "TTNN DistributedTensorConfig",
+                          [
+                           TTNN_DistributedTensorConfig_ReplicateTensor,
+                           TTNN_DistributedTensorConfig_ShardTensor,
+                           TTNN_DistributedTensorConfig_ShardTensor2D,
+                           TTNN_DistributedTensorConfig_AllGatherTensor,
+                          ]> {
+  let genSpecializedAttr = 0;
+  let cppNamespace = "::mlir::tt::ttnn";
+}
+
 def TTNN_UnaryOpType_Exp  : I32EnumAttrCase<"Exp", 0, "exp">;
 def TTNN_UnaryOpType_Recip  : I32EnumAttrCase<"Recip", 1, "recip">;
 def TTNN_UnaryOpType_Gelu  : I32EnumAttrCase<"Gelu", 2, "gelu">;

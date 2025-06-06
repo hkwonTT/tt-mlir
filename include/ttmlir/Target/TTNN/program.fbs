@@ -75,7 +75,9 @@ union OpType {
   ReductionOp,
   ReductionProdOp,
   LoadCachedOp,
-  BatchNormOp
+  BatchNormOp,
+  ExtractShardsOp,
+  AggregateShardsOp,
 }
 
 table Operation {
