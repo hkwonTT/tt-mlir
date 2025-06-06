@@ -38,7 +38,7 @@ table ReduceScatterOp {
   cluster_axis: uint32;
   num_links: uint32;
 }
-table GetDeviceTensorsOp {
+table ExtractShardsOp {
   in: tt.target.ttnn.TensorRef;
   out: [tt.target.ttnn.TensorRef];
 }

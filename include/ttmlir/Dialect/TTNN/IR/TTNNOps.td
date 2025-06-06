@@ -2030,7 +2030,7 @@ def TTNN_RequantizeOp : TTNN_Op<"requantize"> {
     let hasVerifier = 1;
 }
 
-def TTNN_GetDeviceTensorsOp : TTNN_Op<"get_device_tensors"> {
+def TTNN_ExtractShardsOp : TTNN_Op<"extract_shards"> {
   let summary = "Extracts a multi-device sharded tensor into multiple single-device tensors.";
   let description = [{
     Given a multi-device sharded tensor, this operation returns a list of individual single-device tensors,

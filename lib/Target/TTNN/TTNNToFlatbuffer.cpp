@@ -738,8 +738,8 @@ createOp(FlatbufferObjectCache &cache, MeshShardOp op) {
       cache.fbb->CreateVector<int64_t>(shardShape),
       cache.fbb->CreateVector<int64_t>(shardDims));
 }
-::flatbuffers::Offset<::tt::target::ttnn::GetDeviceTensorsOp>
-createOp(FlatbufferObjectCache &cache, GetDeviceTensorsOp op) {
+::flatbuffers::Offset<::tt::target::ttnn::ExtractShardsOp>
+createOp(FlatbufferObjectCache &cache, ExtractShardsOp op) {
   auto input = cache.at<::tt::target::ttnn::TensorRef>(
       getOperandThroughDPSOps(op.getInput()));
 
@@ -751,8 +751,8 @@ createOp(FlatbufferObjectCache &cache, GetDeviceTensorsOp op) {
 
   auto outputsVec = cache.fbb->CreateVector(outputs);
 
-  return ::tt::target::ttnn::CreateGetDeviceTensorsOp(*cache.fbb, input,
-                                                      outputsVec);
+  return ::tt::target::ttnn::CreateExtractShardsOp(*cache.fbb, input,
+                                                   outputsVec);
 }
 
 ::flatbuffers::Offset<::tt::target::ttnn::PermuteOp>
@@ -2094,10 +2094,9 @@ emitTTNNOperation(FlatbufferObjectCache &cache, Operation *op,
                            createOp(cache, loadCachedOp, programIndexMap),
                            debugString, locInfo);
   }
-  if (auto getDeviceTensorsOp = dyn_cast<GetDeviceTensorsOp>(op);
-      getDeviceTensorsOp) {
-    return createOperation(cache, createOp(cache, getDeviceTensorsOp),
-                           debugString, locInfo);
+  if (auto extractShardsOp = dyn_cast<ExtractShardsOp>(op); extractShardsOp) {
+    return createOperation(cache, createOp(cache, extractShardsOp), debugString,
+                           locInfo);
   }
 
   llvm_unreachable("unhandled op in emitTTNNOperation");

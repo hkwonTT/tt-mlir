@@ -2,15 +2,15 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-#ifndef RUNTIME_LIB_TTNN_OPERATIONS_CCL_GET_DEVICE_TENSORS_H
-#define RUNTIME_LIB_TTNN_OPERATIONS_CCL_GET_DEVICE_TENSORS_H
+#ifndef RUNTIME_LIB_TTNN_OPERATIONS_CCL_EXTRACT_SHARDS_H
+#define RUNTIME_LIB_TTNN_OPERATIONS_CCL_EXTRACT_SHARDS_H
 
 #include "tt/runtime/detail/ttnn/types.h"
 #include "ttmlir/Target/TTNN/program_generated.h"
 
 namespace tt::runtime::ttnn::operations::ccl {
-void run(const ::tt::target::ttnn::GetDeviceTensorsOp *op,
+void run(const ::tt::target::ttnn::ExtractShardsOp *op,
          ProgramContext &context);
 } // namespace tt::runtime::ttnn::operations::ccl
 
-#endif // RUNTIME_LIB_TTNN_OPERATIONS_CCL_GET_DEVICE_TENSORS_H
+#endif // RUNTIME_LIB_TTNN_OPERATIONS_CCL_EXTRACT_SHARDS_H

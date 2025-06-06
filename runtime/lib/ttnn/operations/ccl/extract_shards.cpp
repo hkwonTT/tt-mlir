@@ -2,17 +2,14 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-#include "operations/ccl/get_device_tensors.h"
+#include "operations/ccl/extract_shards.h"
 #include "tt/runtime/detail/logger.h"
 #include "tt/runtime/detail/ttnn/operations/utils.h"
 #include "tt/runtime/detail/ttnn/ttnn.h"
 #include "tt/runtime/detail/ttnn/utils.h"
 
-/*
-This is a temporary host fallback to ttnn::PointToPoint(..) API.
-*/
 namespace tt::runtime::ttnn::operations::ccl {
-void run(const ::tt::target::ttnn::GetDeviceTensorsOp *op,
+void run(const ::tt::target::ttnn::ExtractShardsOp *op,
          ProgramContext &context) {
   ProgramTensorPool &tensorPool = context.getTensorPool();
   const ::ttnn::Tensor &inputTensor =

@@ -2159,15 +2159,6 @@ mlir::tt::ttnn::CollectivePermuteOp::fold(FoldAdaptor adaptor) {
 
   return success();
 }
-//===----------------------------------------------------------------------===//
-// GetDeviceTensorsOp
-//===----------------------------------------------------------------------===//
-
-// GetDeviceTensorsOp verification
-::mlir::LogicalResult mlir::tt::ttnn::GetDeviceTensorsOp::verify() {
-  // ToDo: Verifier
-  return success();
-}
 
 //===----------------------------------------------------------------------===//
 // UpdateCacheOp
