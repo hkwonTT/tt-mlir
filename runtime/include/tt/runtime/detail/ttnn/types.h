@@ -155,6 +155,7 @@ public:
         dylibManager(std::move(programDylibManager)), meshDevice(meshDevice),
         executableHandle(executableHandle), programIndex(programIndex) {
     LOG_ASSERT(meshDevice, "Submesh cannot be null");
+    unitMeshDevices = meshDevice->create_submeshes(::ttnn::MeshShape(1, 1));
   }
 
   ProgramContext(const ProgramContext &) = delete;
@@ -173,6 +174,10 @@ public:
 
   const ::ttnn::MeshShape &meshDeviceShape() const {
     return meshDevice->shape();
+  }
+
+  std::shared_ptr<::ttnn::MeshDevice> getUnitMeshDevice(int id) {
+    return unitMeshDevices[id];
   }
 
   //
@@ -207,6 +212,8 @@ private:
   common::DylibManager dylibManager;
 
   std::shared_ptr<::ttnn::MeshDevice> meshDevice;
+
+  std::vector<std::shared_ptr<::ttnn::MeshDevice>> unitMeshDevices;
 
   // The executable binary handle
   Binary executableHandle;

@@ -565,6 +565,12 @@ def TTNN_MeshOffsetAttr : TTNN_Mesh2DCoordAttr<"MeshOffset", "mesh_offset"> {
 def TTNN_DistributedTensorConfigAttr : EnumAttr<TTNN_Dialect, TTNN_DistributedTensorConfig, "distributed_tensor_config"> {
   let assemblyFormat = "`<` $value `>`";
 }
+def TTNN_MeshCoordAttr : TTNN_Mesh2DCoordAttr<"MeshCoord", "mesh_coord"> {
+  let summary = "TTNN Mesh Coordinate";
+  let description = [{
+    Coordinate of a device in the 2D mesh.
+  }];
+}
 
 def TTNN_TTNNLayoutAttr: TTNN_Attr<"TTNNLayout", "ttnn_layout"> {
   let summary = "Tensor encoding attribute used for types in ttnn";
