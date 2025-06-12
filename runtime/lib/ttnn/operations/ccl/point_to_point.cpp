@@ -17,20 +17,20 @@ void run(const ::tt::target::ttnn::PointToPointOp *op,
   DEBUG_ASSERT(!::tt::runtime::ttnn::utils::inSystemMemory(op->in()),
                "Calling ttnn::from_device on a host tensor");
   ProgramTensorPool &tensorPool = context.getTensorPool();
-  const ::ttnn::Tensor &inputTensor =
-      tensorPool.getTTNNTensorAndValidate(op->in());
+
+  std::vector<::tt::runtime::Tensor> hostTensors =
+      toHost(tensorPool.getRuntimeTensorAndValidate(op->in()));
+
+  ::tt::runtime::ttnn::TTNNTensorWrapper &hostMultideviceTensorWrapper =
+      hostTensors[0].as<::tt::runtime::ttnn::TTNNTensorWrapper>(
+          DeviceRuntime::TTNN);
+  ::ttnn::Tensor &hostTensor = hostMultideviceTensorWrapper.getTensor();
   ::ttnn::MeshCoordinate targetCoord(op->dest_coord()->y(),
                                      op->dest_coord()->x());
-  auto targetId =
-      context.getMeshDevice().get_view().find_device_id(targetCoord);
-  auto targetMeshDevice = context.getUnitMeshDevice(targetId);
+  auto *targetDevice = context.getMeshDevice().get_device(targetCoord);
 
-  LOG_DEBUG("target device ID :", targetId, " (", targetCoord.coords()[0], ",",
-            targetCoord.coords()[1], ")");
-
-  ::ttnn::Tensor hostTensor = ::ttnn::from_device(inputTensor);
   ::ttnn::Tensor deviceTensor =
-      ::ttnn::to_device(hostTensor, targetMeshDevice.get(), std::nullopt);
+      ::ttnn::to_device(hostTensor, targetDevice, std::nullopt);
 
   tensorPool.insertTTNNTensorAndValidate(op->out(), deviceTensor);
 }
