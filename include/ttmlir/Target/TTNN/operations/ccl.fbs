@@ -3,6 +3,17 @@ include "ttmlir/Target/TTNN/types.fbs";
 
 namespace tt.target.ttnn;
 
+attribute "optional";
+
+
+table PointToPointOp {
+  in: tt.target.ttnn.TensorRef;
+  out: tt.target.ttnn.TensorRef;
+  sender_id: uint32;
+  receiver_id: uint32;
+  output_tensor: tt.target.ttnn.TensorRef (optional);
+}
+
 table AllGatherOp {
   in: tt.target.ttnn.TensorRef;
   out: tt.target.ttnn.TensorRef;

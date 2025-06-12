@@ -207,7 +207,6 @@ private:
   common::DylibManager dylibManager;
 
   std::shared_ptr<::ttnn::MeshDevice> meshDevice;
-
   // The executable binary handle
   Binary executableHandle;
 

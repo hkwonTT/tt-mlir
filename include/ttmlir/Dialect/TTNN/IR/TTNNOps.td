@@ -1911,6 +1911,18 @@ def TTNN_UpsampleOp : TTNN_Op<"upsample",
     let hasVerifier = 1;
 }
 
+def TTNN_PointToPointOp: TTNN_Op<"point_to_point"> {
+  let summary = "Point To Point operation.";
+  let description = "[{Point to point communcation op. Copy tensor across multi device}]";
+
+  let arguments = (ins AnyRankedTensor:$input,
+                         UI32Attr:$sender_id,
+                         UI32Attr:$receiver_id,
+                         Optional<AnyRankedTensor>:$output_tensor);
+  let results = (outs AnyRankedTensor:$result);
+  let hasVerifier = 1;
+}
+
 def TTNN_QuantizeOp : TTNN_Op<"quantize"> {
     let summary = "Quantize operation.";
     let description = [{

@@ -739,6 +739,25 @@ createOp(FlatbufferObjectCache &cache, MeshShardOp op) {
       cache.fbb->CreateVector<int64_t>(shardDims));
 }
 
+::flatbuffers::Offset<::tt::target::ttnn::PointToPointOp>
+createOp(FlatbufferObjectCache &cache, PointToPointOp op) {
+  auto input = cache.at<::tt::target::ttnn::TensorRef>(
+      getOperandThroughDPSOps(op.getInput()));
+  auto output = cache.getOrCreate(op.getResult(), tensorValueToFlatbuffer,
+                                  kHostAllocatedSize);
+  auto senderId = op.getSenderId();
+  auto receiverId = op.getReceiverId();
+
+  ::flatbuffers::Offset<::tt::target::ttnn::TensorRef> outputTensor = 0;
+  if (op.getOutputTensor()) {
+    outputTensor = cache.at<::tt::target::ttnn::TensorRef>(
+        getOperandThroughDPSOps(op.getOutputTensor()));
+  }
+
+  return ::tt::target::ttnn::CreatePointToPointOp(
+      *cache.fbb, input, output, senderId, receiverId, outputTensor);
+}
+
 ::flatbuffers::Offset<::tt::target::ttnn::PermuteOp>
 createOp(FlatbufferObjectCache &cache, PermuteOp op) {
   flatbuffers::Offset<::tt::target::ttnn::TensorRef> input =
@@ -2052,6 +2071,10 @@ emitTTNNOperation(FlatbufferObjectCache &cache, Operation *op,
   }
   if (auto permuteOp = dyn_cast<PermuteOp>(op); permuteOp) {
     return createOperation(cache, createOp(cache, permuteOp), debugString,
+                           locInfo);
+  }
+  if (auto pointToPointOp = dyn_cast<PointToPointOp>(op); pointToPointOp) {
+    return createOperation(cache, createOp(cache, pointToPointOp), debugString,
                            locInfo);
   }
   if (auto upsampleOp = dyn_cast<UpsampleOp>(op); upsampleOp) {

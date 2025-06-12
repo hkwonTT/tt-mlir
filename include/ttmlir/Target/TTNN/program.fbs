@@ -73,6 +73,7 @@ union OpType {
   UpsampleOp,
   ReductionArgMaxOp,
   ReductionOp,
+  PointToPointOp,
   ReductionProdOp,
   LoadCachedOp,
   BatchNormOp

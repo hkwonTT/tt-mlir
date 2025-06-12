@@ -8,6 +8,7 @@
 #include "operations/ccl/all_gather.h"
 #include "operations/ccl/collective_permute.h"
 #include "operations/ccl/mesh_shard.h"
+#include "operations/ccl/point_to_point.h"
 #include "operations/ccl/reduce_scatter.h"
 #include "operations/context/get_device.h"
 #include "operations/conv/conv2d.h"
@@ -298,6 +299,9 @@ void ProgramExecutor::runOperation(const ::tt::target::ttnn::Operation *op) {
   }
   case ::tt::target::ttnn::OpType::Pool2dOp: {
     return operations::pool::run(op->type_as_Pool2dOp(), getContext());
+  }
+  case ::tt::target::ttnn::OpType::PointToPointOp: {
+    return operations::ccl::run(op->type_as_PointToPointOp(), getContext());
   }
   case ::tt::target::ttnn::OpType::AllGatherOp: {
     return operations::ccl::run(op->type_as_AllGatherOp(), getContext());
