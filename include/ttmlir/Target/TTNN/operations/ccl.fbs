@@ -3,6 +3,14 @@ include "ttmlir/Target/TTNN/types.fbs";
 
 namespace tt.target.ttnn;
 
+
+table PointToPointOp {
+  in: tt.target.ttnn.TensorRef;
+  out: tt.target.ttnn.TensorRef;
+  device: tt.target.DeviceRef;
+  dest_coord: Dim2d;
+}
+
 table AllGatherOp {
   in: tt.target.ttnn.TensorRef;
   out: tt.target.ttnn.TensorRef;
