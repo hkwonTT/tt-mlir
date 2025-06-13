@@ -1371,6 +1371,115 @@ public:
 } // namespace
 
 namespace {
+class AllToAllOpConversionPattern
+    : public OpConversionPattern<ttir::AllToAllOp> {
+public:
+  using OpConversionPattern<ttir::AllToAllOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(ttir::AllToAllOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    ::mlir::RankedTensorType inputType =
+        mlir::cast<::mlir::RankedTensorType>(adaptor.getInput().getType());
+    auto inputShape = inputType.getShape();
+    int32_t splitDim = op.getSplitDim();
+    int32_t splitCount = op.getSplitCount();
+    int32_t concatDim = op.getConcatDim();
+    ::mlir::DenseIntElementsAttr replicaGroups = adaptor.getReplicaGroups();
+    auto replicaGroupsElems = replicaGroups.getValues<int64_t>();
+    auto replicaGroupsShape = replicaGroups.getType().getShape();
+    auto meshDevice = lookupDevice(op);
+
+    int32_t splitSize = inputShape[splitDim] / splitCount;
+    Location loc = op.getLoc();
+    llvm::SmallVector<int64_t> meshShape{meshDevice.getMeshShape()};
+    size_t deviceCount = replicaGroupsElems.size();
+    // 1. Slice
+    llvm::SmallVector<int64_t> slicedShape(inputShape.begin(),
+                                           inputShape.end());
+    slicedShape[splitDim] = splitSize;
+    llvm::SmallVector<int32_t> steps(inputShape.size(), 1);
+    RankedTensorType sliceOutputType =
+        RankedTensorType::Builder(inputType).setShape(slicedShape);
+    llvm::SmallVector<ttnn::SliceOp> sliceOps;
+    for (int32_t sliceIdx = 0; sliceIdx < splitCount; sliceIdx++) {
+      llvm::SmallVector<int32_t> begins(inputShape.size(), 0);
+      llvm::SmallVector<int32_t> ends(inputShape.begin(), inputShape.end());
+      begins[splitDim] = sliceIdx * splitSize;
+      ends[splitDim] = (sliceIdx + 1) * splitSize;
+
+      ttnn::SliceOp sliceOp = rewriter.create<ttnn::SliceOp>(
+          loc, sliceOutputType, adaptor.getInput(),
+          rewriter.getI32ArrayAttr(begins), rewriter.getI32ArrayAttr(ends),
+          rewriter.getI32ArrayAttr(steps));
+      sliceOps.push_back(sliceOp);
+    }
+    // 2. Reorganize
+    Value device = mlir::tt::ttnn::utils::getOrInsertDevice(rewriter, op);
+    std::vector<std::vector<mlir::Value>> reorg(
+        splitCount, std::vector<mlir::Value>(deviceCount));
+    for (size_t sliceIdx = 0; sliceIdx < sliceOps.size(); sliceIdx++) {
+      ttnn::SliceOp &slice = sliceOps[sliceIdx];
+      RankedTensorType sliceOutType = slice.getResult().getType();
+      llvm::SmallVector<mlir::Type, 8> resultTypes(deviceCount, sliceOutType);
+      mlir::TypeRange resultTypeRange(resultTypes);
+      auto extractShardsOp = rewriter.create<ttnn::ExtractShardsOp>(
+          loc, resultTypeRange, slice.getResult());
+
+      for (size_t devId = 0; devId < replicaGroupsElems.size(); devId++) {
+        int64_t groupId = devId / replicaGroupsShape[1];
+        int64_t replicaId = devId % replicaGroupsShape[1];
+        auto sourceId = replicaGroupsElems[devId];
+        auto slicedOutput = extractShardsOp->getResult(sourceId);
+        int64_t targetId =
+            replicaGroupsElems[groupId * replicaGroupsShape[1] + sliceIdx];
+        auto destCoordAttr = ttnn::MeshCoordAttr::get(rewriter.getContext(),
+                                                      targetId / meshShape[1],
+                                                      targetId % meshShape[1]);
+        if (sourceId != targetId) {
+          reorg[replicaId][targetId] =
+              rewriter
+                  .create<ttnn::PointToPointOp>(loc, slicedOutput.getType(),
+                                                slicedOutput, device,
+                                                destCoordAttr)
+                  .getResult();
+        } else {
+          reorg[replicaId][targetId] = slicedOutput;
+        }
+      }
+    }
+    llvm::SmallVector<Value, 4> reorgShards;
+    for (auto shards : reorg) {
+      llvm::SmallVector<Value, 4> inputs;
+      for (auto &shard : shards) {
+        auto hostShard =
+            rewriter.create<ttnn::FromDeviceOp>(loc, shard.getType(), shard);
+        inputs.push_back(hostShard.getResult());
+      }
+      // AggregateAsTensor API doesn't use DistributedTensorConfig argument if
+      // the storage_type of input tensor is 'DEVICE'
+      auto aggregated = rewriter.create<ttnn::AggregateShardsOp>(
+          loc, shards[0].getType(), inputs,
+          ::mlir::tt::ttnn::DistributedTensorConfig::AllGatherTensor);
+
+      reorgShards.push_back(
+          rewriter
+              .create<ttnn::ToDeviceOp>(loc, aggregated.getType(), aggregated,
+                                        device, ttnn::MemoryConfigAttr())
+              .getResult());
+    }
+
+    // 3. Concat
+    rewriter.replaceOpWithNewOp<ttnn::ConcatOp>(
+        op, this->getTypeConverter()->convertType(op.getType()), reorgShards,
+        concatDim,
+        /*memory_config=*/nullptr);
+    return success();
+  }
+};
+} // namespace
+
+namespace {
 class ArangeOpConversionPattern : public OpConversionPattern<ttir::ArangeOp> {
 public:
   using OpConversionPattern<ttir::ArangeOp>::OpConversionPattern;
@@ -1621,6 +1730,7 @@ void populateTTIRToTTNNPatterns(MLIRContext *ctx, RewritePatternSet &patterns,
            AllGatherOpConversionPattern,
            ReduceScatterOpConversionPattern,
            CollectivePermuteOpConversionPattern,
+           AllToAllOpConversionPattern,
            ArangeOpConversionPattern,
            UpdateCacheOpConversionPattern,
            FillCacheOpConversionPattern,
