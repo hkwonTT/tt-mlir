@@ -1436,16 +1436,16 @@ public:
         auto destCoordAttr = ttnn::MeshCoordAttr::get(rewriter.getContext(),
                                                       targetId / meshShape[1],
                                                       targetId % meshShape[1]);
-        if (sourceId != targetId) {
-          reorg[replicaId][targetId] =
-              rewriter
-                  .create<ttnn::PointToPointOp>(loc, slicedOutput.getType(),
-                                                slicedOutput, device,
-                                                destCoordAttr)
-                  .getResult();
-        } else {
-          reorg[replicaId][targetId] = slicedOutput;
-        }
+        // if (sourceId != targetId) {
+        reorg[replicaId][targetId] =
+            rewriter
+                .create<ttnn::PointToPointOp>(loc, slicedOutput.getType(),
+                                              slicedOutput, device,
+                                              destCoordAttr)
+                .getResult();
+        // } else {
+        //   reorg[replicaId][targetId] = slicedOutput;
+        // }
       }
     }
     llvm::SmallVector<Value, 4> reorgShards;
