@@ -7,6 +7,7 @@ import pytest
 from typing import List, Tuple
 from ttir_builder.utils import compile_to_flatbuffer
 from ttir_builder import Operand, TTIRBuilder, Shape
+import test_util
 
 pytestmark = pytest.mark.llmbox
 
@@ -1020,123 +1021,45 @@ def pseudo_golden_all_to_all(
     concat_dim: int,
     mesh_shape: Tuple[int, int],
     shard_dims: Tuple[int, int],
-    cluster_axis: int,
+    replica_groups: Tuple[
+        Tuple[
+            int,
+        ]
+    ],
 ):
-    # sharding
-    num_of_clusters = mesh_shape[1 - cluster_axis]
-    devices_in_cluster = mesh_shape[cluster_axis]
-    clusters = []
-
-    def sharding(
-        input: torch.Tensor, shard_dim: Union[None, int], number_of_shards: int
-    ):
-        output = []
-        if shard_dim == None or shard_dim == -1:
-            output = [input]
-        else:
-            output = torch.chunk(input, number_of_shards, dim=shard_dim)
-        return output
-
-    for cluster in sharding(input, shard_dims[1 - cluster_axis], num_of_clusters):
-        clusters.append(sharding(cluster, shard_dims[cluster_axis], devices_in_cluster))
-    output_per_cluster = []
-    # all to all
-    for cluster in clusters:
-        assert devices_in_cluster == len(cluster)
-        # prepare for all to all
-        scattered_tensors_per_device = []
-        for i in range(devices_in_cluster):
-            scattered_tensors_per_device.append([])
-        # slice and scatter/gather
-        for device_tensor in cluster:
-            sliced = torch.chunk(device_tensor, devices_in_cluster, dim=split_dim)
-            for i in range(devices_in_cluster):
-                scattered_tensors_per_device[i].append(sliced[i])
-        # concat
-        output_per_device = []
-        for i in range(devices_in_cluster):
-            output_per_device.append(
-                torch.cat(scattered_tensors_per_device[i], dim=concat_dim)
+    shards: List[torch.Tensor] = test_util.shardTensor2dMesh(
+        input, mesh_shape, shard_dims
+    )
+    output_shards: List[torch.Tensor] = [None] * len(shards)
+    for group in replica_groups:
+        size = len(group)
+        split_sets = [torch.chunk(shards[r], size, dim=split_dim) for r in group]
+        for dst_idx, r in enumerate(group):
+            output_shards[r] = torch.cat(
+                [split_sets[src_idx][dst_idx] for src_idx in range(size)],
+                dim=concat_dim,
             )
-        output_per_cluster.append(output_per_device)
-
-    def unsharding(inputs: List[torch.Tensor], shard_dim: Union[None, int]):
-        if shard_dim == None or shard_dim == -1:
-            assert len(inputs) == 1
-            return inputs[0]
-        else:
-            return torch.cat(inputs, dim=shard_dim)
-
-    # unsharding
-    outputs = []
-    for output in output_per_cluster:
-        outputs.append(unsharding(output, shard_dims[cluster_axis]))
-    output = unsharding(outputs, shard_dims[1 - cluster_axis])
+    output = test_util.concatMesh2dToTensor(output_shards, mesh_shape, shard_dims)
     return output
 
 
-def generateShardShape(
-    input_rank: int, mesh_shape: Tuple[int, int], shard_dims: Tuple[int, int]
-):
-    shard_shape = [1] * input_rank
-    if shard_dims[0] != -1:
-        shard_shape[shard_dims[0]] = mesh_shape[0]
-    if shard_dims[1] != -1:
-        shard_shape[shard_dims[1]] = mesh_shape[1]
-    return shard_shape
-
-
-def isValidDeviceSharding(input_shape: Shape, mesh_shape: Tuple[int, int], shard_dims):
-    if shard_dims[0] == shard_dims[1]:
-        return False
-    shard_shape = generateShardShape(len(input_shape), mesh_shape, shard_dims)
-    if all(x == 1 for x in shard_shape):
-        return False
-    if len(input_shape) != len(shard_shape):
-        return False
-    if any(i % s != 0 for i, s in zip(input_shape, shard_shape)):
-        return False
-    return True
-
-
-def make_replica_groups(mesh_shape: List[int], cluster_axis: int) -> List[List[int]]:
-    rows, cols = mesh_shape
-    if cluster_axis == 1:
-        # Group across columns → one group per row
-        return [[row * cols + col for col in range(cols)] for row in range(rows)]
-    else:  # cluster_axis == 0
-        # Group across rows → one group per column
-        return [[row * cols + col for row in range(rows)] for col in range(cols)]
-
-
-@pytest.mark.parametrize("input_shape", [(256, 256), (64, 64), (128, 64), (192, 64)])
-@pytest.mark.parametrize("mesh_shape", [(1, 8), (2, 4), (4, 2), (8, 1)])
-@pytest.mark.parametrize("split_dim", [0, 1])
-@pytest.mark.parametrize("concat_dim", [0, 1])
-@pytest.mark.parametrize("cluster_axis", [0, 1])
-@pytest.mark.parametrize("shard_dim_0", [-1, 0, 1])
-@pytest.mark.parametrize("shard_dim_1", [-1, 0, 1])
-def test_all_to_all_2d(
+def all_to_all_test(
     input_shape: Shape,
-    mesh_shape: Tuple[int, int],
     split_dim,
     concat_dim,
+    mesh_shape,
+    shard_dims,
+    shard_shape,
     cluster_axis,
-    shard_dim_0,
-    shard_dim_1,
+    replica_groups,
     request,
 ):
-    shard_dims = (shard_dim_0, shard_dim_1)
-    if isValidDeviceSharding(input_shape, mesh_shape, shard_dims) == False:
+    if not test_util.shape_divisible(input_shape, shard_shape):
         pytest.skip("Sharding is not possible")
-    shard_shape = generateShardShape(len(input_shape), mesh_shape, shard_dims)
-    if shard_dims[cluster_axis] == -1 or shard_shape[shard_dims[cluster_axis]] == 1:
-        pytest.skip("all to all across 1 device")
     if (input_shape[split_dim] / shard_shape[split_dim]) % mesh_shape[
         cluster_axis
     ] != 0:
         pytest.skip("Cannot split tensor evenly")
-    replica_groups = make_replica_groups(mesh_shape, cluster_axis)
 
     def all_to_all(in0: Operand, builder: TTIRBuilder):
         input = builder._get_golden_tensor(in0)
@@ -1146,7 +1069,7 @@ def test_all_to_all_2d(
             concat_dim=concat_dim,
             mesh_shape=mesh_shape,
             shard_dims=shard_dims,
-            cluster_axis=cluster_axis,
+            replica_groups=replica_groups,
         )
         builder.set_graph_input_output([input], [golden_output])
 
@@ -1172,19 +1095,44 @@ def test_all_to_all_2d(
             shard_dims=shard_dims,
         )
 
-    def seq2str(seq, delim="x"):
-        return delim.join(str(num) for num in seq)
-
-    def generate_test_base():
-        return f"test-all-to-all_input_{seq2str(input_shape)}_mesh_{seq2str(mesh_shape)}_split_{split_dim}_concat_{concat_dim}_cluster_{cluster_axis}_shard-dims_{seq2str(shard_dims)}_shard-shape_{seq2str(shard_shape)}"
-
     compile_to_flatbuffer(
         all_to_all,
         [input_shape],
         mesh_shape=mesh_shape,
-        test_base=generate_test_base(),
+        test_base=request.node.name,
         output_root=request.config.getoption("--path"),
         system_desc_path=request.config.getoption("--sys-desc"),
+    )
+
+
+@pytest.mark.parametrize("input_shape", [(256, 256), (64, 64), (128, 64), (192, 64)])
+@pytest.mark.parametrize("split_dim", range(2))
+@pytest.mark.parametrize("concat_dim", range(2))
+@pytest.mark.parametrize(
+    "mesh_shape, shard_dims, shard_shape, cluster_axis, replica_groups",
+    list(test_util.all_sharding_configs(input_rank=2, num_devices=8)),
+)
+def test_all_to_all_2d(
+    input_shape: Shape,
+    split_dim,
+    concat_dim,
+    mesh_shape,
+    shard_dims,
+    shard_shape,
+    cluster_axis,
+    replica_groups,
+    request,
+):
+    all_to_all_test(
+        input_shape=input_shape,
+        split_dim=split_dim,
+        concat_dim=concat_dim,
+        mesh_shape=mesh_shape,
+        shard_dims=shard_dims,
+        shard_shape=shard_shape,
+        cluster_axis=cluster_axis,
+        replica_groups=replica_groups,
+        request=request,
     )
 
 
@@ -1198,79 +1146,31 @@ def test_all_to_all_2d(
         (64, 1, 1, 128),
     ],
 )
-@pytest.mark.parametrize("mesh_shape", [(1, 8), (2, 4), (4, 2), (8, 1)])
-@pytest.mark.parametrize("split_dim", [0, 1, 2, 3])
-@pytest.mark.parametrize("concat_dim", [0, 1, 2, 3])
-@pytest.mark.parametrize("cluster_axis", [0, 1])
-@pytest.mark.parametrize("shard_dim_0", [-1, 0, 1, 2, 3])
-@pytest.mark.parametrize("shard_dim_1", [-1, 0, 1, 2, 3])
+@pytest.mark.parametrize("split_dim", range(4))
+@pytest.mark.parametrize("concat_dim", range(4))
+@pytest.mark.parametrize(
+    "mesh_shape, shard_dims, shard_shape, cluster_axis, replica_groups",
+    list(test_util.all_sharding_configs(input_rank=4, num_devices=8)),
+)
 def test_all_to_all_4d(
     input_shape: Shape,
-    mesh_shape: Tuple[int, int],
     split_dim,
     concat_dim,
+    mesh_shape,
+    shard_dims,
+    shard_shape,
     cluster_axis,
-    shard_dim_0,
-    shard_dim_1,
+    replica_groups,
     request,
 ):
-    shard_dims = (shard_dim_0, shard_dim_1)
-    if isValidDeviceSharding(input_shape, mesh_shape, shard_dims) == False:
-        pytest.skip("Sharding is not possible")
-    shard_shape = generateShardShape(len(input_shape), mesh_shape, shard_dims)
-    if shard_dims[cluster_axis] == -1 or shard_shape[shard_dims[cluster_axis]] == 1:
-        pytest.skip("all to all across 1 device")
-    if (input_shape[split_dim] / shard_shape[split_dim]) % mesh_shape[
-        cluster_axis
-    ] != 0:
-        pytest.skip("Cannot split tensor evenly")
-    replica_groups = make_replica_groups(mesh_shape, cluster_axis)
-
-    def all_to_all(in0: Operand, builder: TTIRBuilder):
-        input = builder._get_golden_tensor(in0)
-        golden_output = pseudo_golden_all_to_all(
-            input,
-            split_dim=split_dim,
-            concat_dim=concat_dim,
-            mesh_shape=mesh_shape,
-            shard_dims=shard_dims,
-            cluster_axis=cluster_axis,
-        )
-        builder.set_graph_input_output([input], [golden_output])
-
-        sharded = builder.mesh_shard(
-            in0,
-            shard_direction="#ttcore.shard_direction<full_to_shard>",
-            shard_type="#ttcore.shard_type<devices>",
-            shard_shape=shard_shape,
-            shard_dims=shard_dims,
-        )
-        gathered = builder.all_to_all(
-            sharded,
-            split_dim=split_dim,
-            concat_dim=concat_dim,
-            split_count=mesh_shape[cluster_axis],
-            replica_groups=replica_groups,
-        )
-        return builder.mesh_shard(
-            gathered,
-            shard_direction="#ttcore.shard_direction<shard_to_full>",
-            shard_type="#ttcore.shard_type<devices>",
-            shard_shape=shard_shape,
-            shard_dims=shard_dims,
-        )
-
-    def seq2str(seq, delim="x"):
-        return delim.join(str(num) for num in seq)
-
-    def generate_test_base():
-        return f"test-all-to-all_input_{seq2str(input_shape)}_mesh_{seq2str(mesh_shape)}_split_{split_dim}_concat_{concat_dim}_cluster_{cluster_axis}_shard-dims_{seq2str(shard_dims)}_shard-shape_{seq2str(shard_shape)}"
-
-    compile_to_flatbuffer(
-        all_to_all,
-        [input_shape],
+    all_to_all_test(
+        input_shape=input_shape,
+        split_dim=split_dim,
+        concat_dim=concat_dim,
         mesh_shape=mesh_shape,
-        test_base=generate_test_base(),
-        output_root=request.config.getoption("--path"),
-        system_desc_path=request.config.getoption("--sys-desc"),
+        shard_dims=shard_dims,
+        shard_shape=shard_shape,
+        cluster_axis=cluster_axis,
+        replica_groups=replica_groups,
+        request=request,
     )
