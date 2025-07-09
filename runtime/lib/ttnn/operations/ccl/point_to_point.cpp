@@ -13,6 +13,18 @@ This is a temporary host fallback to ttnn::PointToPoint(..) API.
 */
 
 namespace tt::runtime::ttnn::operations::ccl {
+
+size_t calcIdFromCoords(const ::ttnn::MeshShape &meshShape,
+                        const flatbuffers::Vector<int64_t> *coords) {
+  DEBUG_ASSERT(coords->size() == meshShape.dims(),
+               "MeshShape and coords size mismatch");
+
+  size_t id = 0;
+  for (size_t i = 0; i < meshShape.dims(); i++) {
+    id = id * meshShape[i] + (*coords)[i];
+  }
+  return id;
+}
 void run(const ::tt::target::ttnn::PointToPointOp *op,
          ProgramContext &context) {
   DEBUG_ASSERT(!::tt::runtime::ttnn::utils::inSystemMemory(op->in()),
@@ -40,7 +52,12 @@ void run(const ::tt::target::ttnn::PointToPointOp *op,
     outputTensorsHost = inputTensorsHost;
   }
 
-  outputTensorsHost[op->receiver_id()] = inputTensorsHost[op->sender_id()];
+  size_t sendId = calcIdFromCoords(inputTensor.mesh_device()->shape(),
+                                   op->send_coord()->coords());
+  size_t recvId = calcIdFromCoords(inputTensor.mesh_device()->shape(),
+                                   op->receive_coord()->coords());
+
+  outputTensorsHost[recvId] = inputTensorsHost[sendId];
 
   ::ttnn::Tensor outputTensor = ::ttnn::to_device(
       ::ttnn::distributed::from_host_shards(outputTensorsHost,
