@@ -94,47 +94,59 @@ def test_all_gather(
 
 
 @pytest.mark.parametrize(
-    "shape",
+    "test_shape",
     [
-        (1, 1, 256, 512),
-        (1, 1, 2, 4),
+        (1, 1, 256, 256),
+        (1, 256, 256),
+        (256, 256),
+        (1, 1, 256, 257),
+        (1, 1, 256, 255),
+        (256, 257),
+        (256, 255),
+        (1, 256, 256, 1),
+        (256, 256, 1, 1),
+        (1024, 256),
+        (256, 1024),
         pytest.param(
-            (1, 1, 64, 128), marks=pytest.mark.run_error
+            (1, 1, 32, 64), marks=pytest.mark.run_error
         ),  # https://github.com/tenstorrent/tt-metal/issues/21987
-        pytest.param((1, 1, 64, 256), marks=pytest.mark.run_error),
-        pytest.param((1, 1, 128, 256), marks=pytest.mark.run_error),
-        pytest.param((1, 1, 256, 256), marks=pytest.mark.run_error),
-        pytest.param(
-            (1, 1, 128, 512), marks=pytest.mark.run_error
-        ),  # hangs # https://github.com/tenstorrent/tt-metal/issues/21987
     ],
 )
-@pytest.mark.parametrize("mesh_shape", [(2, 4)])
-def test_all_reduce(shape: Shape, mesh_shape: Tuple[int, int], request):
+@pytest.mark.parametrize("mesh_shape", [(2, 4), (1, 8)])
+@pytest.mark.parametrize("cluster_axis", [0, 1])
+def test_all_reduce(
+    test_shape: Shape, mesh_shape: Tuple[int, int], cluster_axis: int, request
+):
+    shard_shape, shard_dims, input_shape = generate_mesh_shard_args(
+        mesh_shape, test_shape
+    )
+    if mesh_shape[cluster_axis] == 1:
+        pytest.skip("CCL across 1 device is meaningless")
+    # test 'sum' only for now. Other reduce types are not supported yet.
     def all_reduce(in0: Operand, builder: TTIRBuilder):
         sharded = builder.mesh_shard(
             in0,
             shard_direction="#ttcore.shard_direction<full_to_shard>",
             shard_type="#ttcore.shard_type<devices>",
-            shard_shape=(1, 1, 2, 4),
-            shard_dims=(2, 3),
+            shard_shape=shard_shape,
+            shard_dims=shard_dims,
         )
         reduced = builder.all_reduce(
             sharded,
             reduce_type="#ttcore.reduce_type<sum>",
-            cluster_axis=1,
+            cluster_axis=cluster_axis,
         )
         return builder.mesh_shard(
             reduced,
             shard_direction="#ttcore.shard_direction<shard_to_full>",
             shard_type="#ttcore.shard_type<devices>",
-            shard_shape=(1, 1, 2, 1),
-            shard_dims=(2, -1),
+            shard_shape=shard_shape,
+            shard_dims=shard_dims,
         )
 
     compile_to_flatbuffer(
         all_reduce,
-        [shape],
+        [input_shape],
         mesh_shape=mesh_shape,
         test_base=request.node.name,
         output_root=request.config.getoption("--path"),
