@@ -4,11 +4,26 @@
 import torch
 import pytest
 
-from typing import List, Tuple
+from typing import List, Tuple, Any, Sequence
 from ttir_builder.utils import compile_to_flatbuffer
 from ttir_builder import Operand, TTIRBuilder, Shape
+from collections.abc import Sequence
 
 pytestmark = pytest.mark.llmbox
+
+
+def _format_value(val: Any) -> str:
+    if isinstance(val, str):
+        return val
+    if isinstance(val, Sequence) and not isinstance(val, (bytes, bytearray)):
+        inner = "x".join(map(str, val))
+        return f"({inner})"
+    return str(val)
+
+
+def make_testcase_name(**kwargs) -> str:
+    parts = [f"{name}={_format_value(value)}" for name, value in kwargs.items()]
+    return "-".join(parts)
 
 
 def generate_mesh_shard_args(mesh_shape: Tuple[int, ...], test_shape: Shape):
@@ -168,7 +183,7 @@ def test_all_reduce(
         (1, 1, 256, 128),
     ],
 )
-@pytest.mark.parametrize("mesh_shape", [(2, 4), (1, 8)])
+@pytest.mark.parametrize("mesh_shape", [(2, 4), (1, 8), (4, 2), (8, 1)])
 @pytest.mark.parametrize("scatter_dim", [0, 1, 2, 3])
 @pytest.mark.parametrize("cluster_axis", [0, 1])
 def test_reduce_scatter(
@@ -218,7 +233,13 @@ def test_reduce_scatter(
         reduce_scatter,
         [input_shape],
         mesh_shape=mesh_shape,
-        test_base=request.node.name,
+        test_base=make_testcase_name(
+            test_case="reduce_scatter",
+            test_shape=test_shape,
+            mesh_shape=mesh_shape,
+            scatter_dim=scatter_dim,
+            cluster_axis=cluster_axis,
+        ),
         output_root=request.config.getoption("--path"),
         system_desc_path=request.config.getoption("--sys-desc"),
     )
