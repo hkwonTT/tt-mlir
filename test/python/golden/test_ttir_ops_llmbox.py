@@ -155,58 +155,68 @@ def test_all_reduce(
 
 
 @pytest.mark.parametrize(
-    "shape",
+    "test_shape",
     [
-        (1, 1, 512, 512),
-        (1, 1, 256, 1024),
-        (1, 1, 256, 512),
-        (1, 1, 254, 1024),
-        (1, 1, 256, 1024),
-        (1, 1, 128, 1024),
-        pytest.param(
-            (1, 1, 256, 1008), marks=pytest.mark.run_error
-        ),  # https://github.com/tenstorrent/tt-metal/issues/21987
-        pytest.param((1, 1, 256, 1040), marks=pytest.mark.run_error),
-        pytest.param((1, 1, 128, 256), marks=pytest.mark.run_error),
-        pytest.param((1, 1, 128, 128), marks=pytest.mark.run_error),
-        pytest.param((1, 1, 128, 64), marks=pytest.mark.run_error),
-        pytest.param((1, 1, 64, 64), marks=pytest.mark.run_error),
-        pytest.param((1, 1, 64, 128), marks=pytest.mark.run_error),
-        pytest.param((1, 1, 2, 16), marks=pytest.mark.run_error),
-        pytest.param(
-            (1, 1, 128, 512), marks=pytest.mark.run_error
-        ),  # hangs # https://github.com/tenstorrent/tt-metal/issues/21987
-        pytest.param((1, 1, 64, 512), marks=pytest.mark.run_error),  # hangs
-        pytest.param((1, 1, 32, 512), marks=pytest.mark.run_error),  # hangs
+        (1, 1, 256, 256),
+        (1, 256, 256),
+        (256, 256),
+        (256, 248),
+        (248, 256),
+        (256, 264),
+        (264, 256),
+        (1, 1, 128, 256),
+        (1, 1, 256, 128),
     ],
 )
-@pytest.mark.parametrize("mesh_shape", [(2, 4)])
-def test_reduce_scatter(shape: Shape, mesh_shape: Tuple[int, int], request):
+@pytest.mark.parametrize("mesh_shape", [(2, 4), (1, 8)])
+@pytest.mark.parametrize("scatter_dim", [0, 1, 2, 3])
+@pytest.mark.parametrize("cluster_axis", [0, 1])
+def test_reduce_scatter(
+    test_shape: Shape,
+    mesh_shape: Tuple[int, int],
+    scatter_dim: int,
+    cluster_axis: int,
+    request,
+):
+    shard_shape, shard_dims, input_shape = generate_mesh_shard_args(
+        mesh_shape, test_shape
+    )
+    if mesh_shape[cluster_axis] == 1:
+        pytest.skip("CCL across 1 device is meaningless")
+    if scatter_dim >= len(test_shape):
+        pytest.skip("scatter_dim is out of range")
+    if test_shape[scatter_dim] % mesh_shape[cluster_axis] != 0:
+        pytest.skip("Test shape is not divisible by number of devices")
+    if scatter_dim != len(test_shape) - 1:
+        pytest.skip("Known issue : Reduce Scater produces incorrect output")
+        # https://github.com/tenstorrent/tt-metal/issues/19433
+
+    # test 'sum' only for now. Other reduce types are not supported yet.
     def reduce_scatter(in0: Operand, builder: TTIRBuilder):
         sharded = builder.mesh_shard(
             in0,
             shard_direction="#ttcore.shard_direction<full_to_shard>",
             shard_type="#ttcore.shard_type<devices>",
-            shard_shape=(1, 1, 2, 4),
-            shard_dims=(2, 3),
+            shard_shape=shard_shape,
+            shard_dims=shard_dims,
         )
         reduced = builder.reduce_scatter(
             sharded,
             reduce_type="#ttcore.reduce_type<sum>",
-            scatter_dim=3,
-            cluster_axis=1,
+            scatter_dim=scatter_dim,
+            cluster_axis=cluster_axis,
         )
         return builder.mesh_shard(
             reduced,
             shard_direction="#ttcore.shard_direction<shard_to_full>",
             shard_type="#ttcore.shard_type<devices>",
-            shard_shape=(1, 1, 2, 4),
-            shard_dims=(2, 3),
+            shard_shape=shard_shape,
+            shard_dims=shard_dims,
         )
 
     compile_to_flatbuffer(
         reduce_scatter,
-        [shape],
+        [input_shape],
         mesh_shape=mesh_shape,
         test_base=request.node.name,
         output_root=request.config.getoption("--path"),
