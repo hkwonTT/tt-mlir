@@ -12,8 +12,6 @@ from builder.ttir.ttir_utils import compile_ttir_to_flatbuffer
 from test_utils import make_shard_shape
 
 
-pytestmark = pytest.mark.llmbox
-
 
 @pytest.mark.parametrize(
     "input_rank, shard_dims",
@@ -52,7 +50,7 @@ pytestmark = pytest.mark.llmbox
         (2, (0, -1)),
     ],
 )
-@pytest.mark.parametrize("mesh_shape", [(2, 4), (4, 2), (1, 8), (8, 1)])
+@pytest.mark.parametrize("mesh_shape", [(2, 4), (4, 2), (1, 8), (8, 1), (1, 2), (2, 1)])
 def test_mesh_shard_devices(
     input_rank: int, shard_dims: Tuple[int, int], mesh_shape: Tuple[int, int], request
 ):
@@ -105,7 +103,7 @@ def test_mesh_shard_devices(
         (128, 256),
     ],
 )
-@pytest.mark.parametrize("mesh_shape", [(2, 4), (1, 8)])
+@pytest.mark.parametrize("mesh_shape", [(2, 4), (1, 8), (1, 2)])
 @pytest.mark.parametrize("all_gather_dim", [0, 1, 2, 3])
 @pytest.mark.parametrize("cluster_axis", [0, 1])
 def test_all_gather(
@@ -159,7 +157,7 @@ def test_all_gather(
         ),  # https://github.com/tenstorrent/tt-metal/issues/21987
     ],
 )
-@pytest.mark.parametrize("mesh_shape", [(2, 4), (1, 8)])
+@pytest.mark.parametrize("mesh_shape", [(2, 4), (1, 8), (1, 2)])
 @pytest.mark.parametrize("cluster_axis", [0, 1])
 def test_all_reduce(
     test_shape: Shape,
@@ -207,7 +205,7 @@ def test_all_reduce(
         pytest.param((1, 1, 256, 128), marks=pytest.mark.run_error),
     ],
 )
-@pytest.mark.parametrize("mesh_shape", [(2, 4), (1, 8)])
+@pytest.mark.parametrize("mesh_shape", [(2, 4), (1, 8), (1, 2)])
 @pytest.mark.parametrize("scatter_dim", [0, 1, 2, 3])
 @pytest.mark.parametrize("cluster_axis", [0, 1])
 def test_reduce_scatter(
@@ -313,6 +311,8 @@ def test_collective_permute(
         ((2, 4), ((0, 1, 2, 3), (4, 5, 6, 7))),
         ((4, 2), ((0, 2, 4, 6), (1, 3, 5, 7))),
         ((4, 2), ((0, 1), (2, 3), (4, 5), (6, 7))),
+        ((1, 2), ((0, 1),)),
+        ((2, 1), ((0, 1),)),
     ],
 )
 def test_all_to_all(
@@ -368,6 +368,8 @@ def test_all_to_all(
         ((4, 2), [(0, 1), (2, 3), (4, 5), (6, 7)]),
         ((4, 2), [(0, 2, 4, 6), (1, 3, 5, 7)]),
         ((1, 8), [(0, 1, 2, 3, 4, 5, 6, 7)]),
+        ((1, 2), ((0, 1),)),
+        ((2, 1), ((0, 1),)),
     ],
 )
 def test_collective_broadcast(
