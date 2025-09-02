@@ -431,35 +431,63 @@ getShardingForOpResult(mlir::OpResult res, mlir::sdy::MeshOp globalMeshOp) {
 //
 // If no sharding annotation is found, returns a default "full replicate"
 // sharding attribute.
+// mlir::sdy::TensorShardingAttr getShardingAttr(mlir::Value v,
+//                                               mlir::sdy::MeshOp globalMeshOp)
+//                                               {
+//   mlir::sdy::TensorShardingAttr result =
+//       shardy_utils::getDefaultTensorSdyShardingAttr(
+//           v.getContext(), globalMeshOp.getSymName(), v.getType());
+
+//   if (auto barg = mlir::dyn_cast<mlir::BlockArgument>(v)) {
+//     // manual_computation region argument
+//     result = getShardingForManualComputationArg(barg, globalMeshOp);
+
+//     // func.func entry-block argument (only if still unresolved)
+//     if (!result) {
+//       mlir::Operation *parent = barg.getOwner()->getParentOp();
+//       if (parent) {
+//         auto funcOp = parent->getParentOfType<mlir::func::FuncOp>();
+//         if (funcOp && parent == funcOp.getOperation()) {
+//           auto inAttrs =
+//               getInShardingAttrs(funcOp.getContext(), funcOp, globalMeshOp);
+//           unsigned i = barg.getArgNumber();
+//           if (i < inAttrs.size()) {
+//             result = inAttrs[i];
+//           }
+//         }
+//       }
+//     }
+//   } else if (auto res = mlir::dyn_cast<mlir::OpResult>(v)) {
+//     result = getShardingForOpResult(res, globalMeshOp);
+//   }
+//   // If still unresolved, fall back to "full replicate"
+//   return result;
+// }
+
 mlir::sdy::TensorShardingAttr getShardingAttr(mlir::Value v,
                                               mlir::sdy::MeshOp globalMeshOp) {
   mlir::sdy::TensorShardingAttr result =
       shardy_utils::getDefaultTensorSdyShardingAttr(
           v.getContext(), globalMeshOp.getSymName(), v.getType());
-
-  if (auto barg = mlir::dyn_cast<mlir::BlockArgument>(v)) {
-    // manual_computation region argument
-    result = getShardingForManualComputationArg(barg, globalMeshOp);
-
-    // func.func entry-block argument (only if still unresolved)
-    if (!result) {
-      mlir::Operation *parent = barg.getOwner()->getParentOp();
-      if (parent) {
-        auto funcOp = parent->getParentOfType<mlir::func::FuncOp>();
-        if (funcOp && parent == funcOp.getOperation()) {
-          auto inAttrs =
-              getInShardingAttrs(funcOp.getContext(), funcOp, globalMeshOp);
-          unsigned i = barg.getArgNumber();
-          if (i < inAttrs.size()) {
-            result = inAttrs[i];
-          }
+  if (auto blockArgument = mlir::dyn_cast<mlir::BlockArgument>(v)) {
+    mlir::Block *parentBlock = blockArgument.getOwner();
+    if (auto *parentOp = parentBlock->getParentOp()) {
+      if (auto funcOp = mlir::dyn_cast<mlir::func::FuncOp>(parentOp)) {
+        auto inAttrs =
+            getInShardingAttrs(funcOp.getContext(), funcOp, globalMeshOp);
+        unsigned index = blockArgument.getArgNumber();
+        if (index < inAttrs.size()) {
+          result = inAttrs[index];
         }
+      } else if (auto manualComputationOp =
+                     mlir::dyn_cast<mlir::sdy::ManualComputationOp>(parentOp)) {
+        result =
+            getShardingForManualComputationArg(blockArgument, globalMeshOp);
       }
     }
-  } else if (auto res = mlir::dyn_cast<mlir::OpResult>(v)) {
-    result = getShardingForOpResult(res, globalMeshOp);
+  } else if (auto opResult = mlir::dyn_cast<mlir::OpResult>(v)) {
+    result = getShardingForOpResult(opResult, globalMeshOp);
   }
-  // If still unresolved, fall back to "full replicate"
   return result;
 }
 
