@@ -370,10 +370,15 @@ getOutShardingAttrs(MLIRContext *context, func::FuncOp &funcOp,
 }
 
 // Reads sharding for a manual_computation region argument.
-// Returns nullptr if not available.
+// Returns full replicate if not available.
 mlir::sdy::TensorShardingAttr
-getShardingForManualComputationArg(mlir::BlockArgument barg) {
-  mlir::sdy::TensorShardingAttr result = nullptr;
+getShardingForManualComputationArg(mlir::BlockArgument barg,
+                                   mlir::sdy::MeshOp globalMeshOp) {
+
+  mlir::sdy::TensorShardingAttr result =
+      shardy_utils::getDefaultTensorSdyShardingAttr(barg.getType().getContext(),
+                                                    globalMeshOp.getSymName(),
+                                                    barg.getType());
 
   mlir::Operation *parent = barg.getOwner()->getParentOp();
   auto mc = llvm::dyn_cast_or_null<mlir::sdy::ManualComputationOp>(parent);
@@ -394,15 +399,18 @@ getShardingForManualComputationArg(mlir::BlockArgument barg) {
 
 // Reads sharding for an OpResult via op-level attributes.
 // Prefers sdy.sharding_per_value, then falls back to sdy.sharding.
-// Returns nullptr if not available.
-mlir::sdy::TensorShardingAttr getShardingForOpResult(mlir::OpResult res) {
-  mlir::sdy::TensorShardingAttr result = nullptr;
+// Returns full replicate if not available.
+mlir::sdy::TensorShardingAttr
+getShardingForOpResult(mlir::OpResult res, mlir::sdy::MeshOp globalMeshOp) {
+  mlir::sdy::TensorShardingAttr result =
+      shardy_utils::getDefaultTensorSdyShardingAttr(
+          res.getType().getContext(), globalMeshOp.getSymName(), res.getType());
 
   mlir::Operation *owner = res.getOwner();
   unsigned resNo = res.getResultNumber();
 
   auto spv = owner->getAttrOfType<mlir::sdy::TensorShardingPerValueAttr>(
-      "sdy.sharding_per_value");
+      mlir::sdy::TensorShardingPerValueAttr::name);
   if (spv) {
     auto shardings = spv.getShardings(); // ArrayRef<TensorShardingAttr>
     if (!shardings.empty()) {
@@ -410,15 +418,6 @@ mlir::sdy::TensorShardingAttr getShardingForOpResult(mlir::OpResult res) {
       result = shardings[i];
     }
   }
-
-  if (!result) {
-    auto ts =
-        owner->getAttrOfType<mlir::sdy::TensorShardingAttr>("sdy.sharding");
-    if (ts) {
-      result = ts;
-    }
-  }
-
   return result;
 }
 
@@ -434,11 +433,13 @@ mlir::sdy::TensorShardingAttr getShardingForOpResult(mlir::OpResult res) {
 // sharding attribute.
 mlir::sdy::TensorShardingAttr getShardingAttr(mlir::Value v,
                                               mlir::sdy::MeshOp globalMeshOp) {
-  mlir::sdy::TensorShardingAttr result = nullptr;
+  mlir::sdy::TensorShardingAttr result =
+      shardy_utils::getDefaultTensorSdyShardingAttr(
+          v.getContext(), globalMeshOp.getSymName(), v.getType());
 
   if (auto barg = mlir::dyn_cast<mlir::BlockArgument>(v)) {
     // manual_computation region argument
-    result = getShardingForManualComputationArg(barg);
+    result = getShardingForManualComputationArg(barg, globalMeshOp);
 
     // func.func entry-block argument (only if still unresolved)
     if (!result) {
@@ -456,13 +457,9 @@ mlir::sdy::TensorShardingAttr getShardingAttr(mlir::Value v,
       }
     }
   } else if (auto res = mlir::dyn_cast<mlir::OpResult>(v)) {
-    result = getShardingForOpResult(res);
+    result = getShardingForOpResult(res, globalMeshOp);
   }
   // If still unresolved, fall back to "full replicate"
-  if (!result) {
-    result = shardy_utils::getDefaultTensorSdyShardingAttr(
-        v.getContext(), globalMeshOp.getSymName(), v.getType());
-  }
   return result;
 }
 

@@ -87,10 +87,14 @@ llvm::SmallVector<mlir::sdy::TensorShardingAttr>
 getOutShardingAttrs(MLIRContext *context, func::FuncOp &funcOp,
                     mlir::sdy::MeshOp &globalMeshOp);
 
+// Get the sharding for a manual computation region argument.
 mlir::sdy::TensorShardingAttr
-getShardingForManualComputationArg(mlir::BlockArgument barg);
+getShardingForManualComputationArg(mlir::BlockArgument barg,
+                                   mlir::sdy::MeshOp globalMeshOp);
 
-mlir::sdy::TensorShardingAttr getShardingForOpResult(mlir::OpResult res);
+// Get the sharding for an op result.
+mlir::sdy::TensorShardingAttr
+getShardingForOpResult(mlir::OpResult res, mlir::sdy::MeshOp globalMeshOp);
 
 mlir::sdy::TensorShardingAttr getShardingAttr(mlir::Value v,
                                               mlir::sdy::MeshOp globalMeshOp);
