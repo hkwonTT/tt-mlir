@@ -403,10 +403,226 @@ class ShardyToStableHLOCollectivePermuteOpRewritePattern
 public:
   LogicalResult matchAndRewrite(mlir::sdy::CollectivePermuteOp srcOp,
                                 PatternRewriter &rewriter) const override {
-    srcOp.emitError() << "ShardyToStableHLO lowering for CollectivePermuteOp "
-                         "is not implemented yet: "
-                         "https://github.com/tenstorrent/tt-mlir/issues/3370.";
-    return failure();
+    MLIRContext *context = getContext();
+
+    // Set a default channel handle attr since we don't use it in tt-mlir stack
+    // but stablehlo::CollectivePermuteOp rewriter requires it.
+    mlir::stablehlo::ChannelHandleAttr channelHandleAttr =
+        mlir::stablehlo::ChannelHandleAttr::get(context, /*handle=*/1,
+                                                /*type=*/1);
+
+    // Get the mesh map from the output sharding using existing function
+    mlir::tt::shardy_utils::MeshMap meshMap =
+        getMeshMap<mlir::sdy::CollectivePermuteOp>(srcOp);
+
+    // For collective permute, we need to determine the source_target_pairs
+    // based on the sharding transformation. Since collective permute is used
+    // to reorder or replace axes that shard the tensor, we need to analyze
+    // the input and output shardings to determine the permutation pattern.
+
+    // Get input and output sharding information
+    mlir::sdy::TensorShardingAttr inputSharding;
+    mlir::sdy::TensorShardingAttr outputSharding = srcOp.getOutSharding();
+
+    // Get the mesh operation to access operand sharding
+    mlir::Attribute meshAttrOrRef = outputSharding.getMeshOrRef();
+    mlir::sdy::MeshOp meshOp;
+    if (mlir::isa<mlir::sdy::MeshAttr>(meshAttrOrRef)) {
+      // For inline mesh attributes, find the corresponding mesh op
+      auto module = srcOp->getParentOfType<mlir::ModuleOp>();
+      auto meshOps = mlir::tt::shardy_utils::getMeshOps(module);
+      if (!meshOps.empty()) {
+        meshOp = meshOps[0]; // Use the first mesh op found
+      }
+    } else if (mlir::isa<mlir::SymbolRefAttr>(meshAttrOrRef)) {
+      mlir::SymbolRefAttr symbolRefAttr =
+          mlir::cast<mlir::SymbolRefAttr>(meshAttrOrRef);
+      auto *symbolOp = mlir::SymbolTable::lookupSymbolIn(
+          srcOp->getParentOfType<ModuleOp>(), symbolRefAttr);
+      meshOp = mlir::cast<mlir::sdy::MeshOp>(symbolOp);
+    }
+
+    // Get input sharding from the operand using existing utility function
+    if (meshOp) {
+      mlir::OpOperand &operand = srcOp->getOpOperand(0);
+      inputSharding =
+          mlir::tt::shardy_utils::getOperandShardingAttr(operand, meshOp);
+    } else {
+      // Fallback to default sharding if mesh op not found
+      inputSharding = mlir::tt::shardy_utils::getDefaultTensorSdyShardingAttr(
+          context, "mesh", srcOp.getOperand().getType());
+    }
+
+    // Compute source_target_pairs based on sharding differences
+    llvm::SmallVector<llvm::SmallVector<int64_t>> sourceTargetPairs =
+        computeSourceTargetPairs(inputSharding, outputSharding, meshMap);
+
+    // Create the StableHLO collective_permute operation
+    mlir::stablehlo::CollectivePermuteOp collectivePermuteOp =
+        rewriter.create<mlir::stablehlo::CollectivePermuteOp>(
+            srcOp.getLoc(), srcOp.getResult().getType(), srcOp.getOperand(),
+            createDenseAttrFromReplicaGroups(context, sourceTargetPairs),
+            channelHandleAttr);
+
+    rewriter.replaceAllUsesWith(srcOp, collectivePermuteOp.getResult());
+    srcOp->erase();
+    return success();
+  }
+
+private:
+  // Helper function to compute source_target_pairs based on sharding
+  // differences
+  llvm::SmallVector<llvm::SmallVector<int64_t>>
+  computeSourceTargetPairs(mlir::sdy::TensorShardingAttr inputSharding,
+                           mlir::sdy::TensorShardingAttr outputSharding,
+                           mlir::tt::shardy_utils::MeshMap meshMap) const {
+    // Extract dimension shardings for comparison
+    auto inputDimShardings = inputSharding.getDimShardings();
+    auto outputDimShardings = outputSharding.getDimShardings();
+
+    // Compute the permutation based on sharding differences
+    return computePermutationFromShardingDiff(inputDimShardings,
+                                              outputDimShardings, meshMap);
+  }
+
+  // Helper function to compute permutation based on sharding differences
+  llvm::SmallVector<llvm::SmallVector<int64_t>>
+  computePermutationFromShardingDiff(
+      llvm::ArrayRef<mlir::sdy::DimensionShardingAttr> inputDimShardings,
+      llvm::ArrayRef<mlir::sdy::DimensionShardingAttr> outputDimShardings,
+      mlir::tt::shardy_utils::MeshMap meshMap) const {
+
+    llvm::SmallVector<llvm::SmallVector<int64_t>> sourceTargetPairs;
+
+    // Calculate total number of devices
+    int64_t totalDevices = 1;
+    for (const auto &[axisName, axisSize] : meshMap) {
+      totalDevices *= axisSize;
+    }
+
+    // Convert mesh map to ordered axis sizes for coordinate computation
+    llvm::SmallVector<int64_t> axisSizes;
+    for (const auto &[axisName, axisSize] : meshMap) {
+      axisSizes.push_back(axisSize);
+    }
+
+    // Create device coordinate mapping
+    llvm::SmallVector<int64_t> deviceMapping(totalDevices);
+
+    // For each device, compute its input and output coordinates
+    for (int64_t deviceId = 0; deviceId < totalDevices; ++deviceId) {
+      // Convert device ID to multi-dimensional coordinates
+      llvm::SmallVector<int64_t> inputCoords =
+          deviceIdToCoords(deviceId, axisSizes);
+
+      // Apply sharding transformation to coordinates
+      llvm::SmallVector<int64_t> outputCoords = applyShardingTransformation(
+          inputCoords, inputDimShardings, outputDimShardings, meshMap);
+
+      // Convert output coordinates back to device ID
+      int64_t outputDeviceId = coordsToDeviceId(outputCoords, axisSizes);
+      deviceMapping[deviceId] = outputDeviceId;
+    }
+
+    // Generate source-target pairs
+    for (int64_t i = 0; i < totalDevices; ++i) {
+      sourceTargetPairs.push_back({i, deviceMapping[i]});
+    }
+
+    return sourceTargetPairs;
+  }
+
+  // Helper function to convert device ID to multi-dimensional coordinates
+  llvm::SmallVector<int64_t>
+  deviceIdToCoords(int64_t deviceId,
+                   const llvm::SmallVector<int64_t> &axisSizes) const {
+    llvm::SmallVector<int64_t> coords(axisSizes.size());
+    int64_t remaining = deviceId;
+
+    for (int i = axisSizes.size() - 1; i >= 0; --i) {
+      coords[i] = remaining % axisSizes[i];
+      remaining /= axisSizes[i];
+    }
+
+    return coords;
+  }
+
+  // Helper function to convert multi-dimensional coordinates to device ID
+  int64_t coordsToDeviceId(const llvm::SmallVector<int64_t> &coords,
+                           const llvm::SmallVector<int64_t> &axisSizes) const {
+    int64_t deviceId = 0;
+    int64_t multiplier = 1;
+
+    for (int i = coords.size() - 1; i >= 0; --i) {
+      deviceId += coords[i] * multiplier;
+      multiplier *= axisSizes[i];
+    }
+
+    return deviceId;
+  }
+
+  // Helper function to apply sharding transformation to coordinates
+  llvm::SmallVector<int64_t> applyShardingTransformation(
+      const llvm::SmallVector<int64_t> &inputCoords,
+      llvm::ArrayRef<mlir::sdy::DimensionShardingAttr> inputDimShardings,
+      llvm::ArrayRef<mlir::sdy::DimensionShardingAttr> outputDimShardings,
+      mlir::tt::shardy_utils::MeshMap meshMap) const {
+
+    llvm::SmallVector<int64_t> outputCoords = inputCoords;
+
+    // Since we only support one mesh axis per tensor dimension, we can
+    // analyze the dimension-to-axis mapping changes more directly
+
+    // Create mapping from axis names to their indices in the coordinate system
+    llvm::StringMap<int> axisNameToIndex;
+    int index = 0;
+    for (const auto &[axisName, axisSize] : meshMap) {
+      axisNameToIndex[axisName] = index++;
+    }
+
+    // Analyze the sharding changes and apply coordinate transformations
+    if (inputDimShardings.size() == outputDimShardings.size()) {
+      for (size_t dim = 0; dim < inputDimShardings.size(); ++dim) {
+        auto inputDimSharding = inputDimShardings[dim];
+        auto outputDimSharding = outputDimShardings[dim];
+
+        if (inputDimSharding != outputDimSharding) {
+          // Extract axis information from input and output shardings
+          auto inputAxes = inputDimSharding.getAxes();
+          auto outputAxes = outputDimSharding.getAxes();
+
+          // Since we only support one mesh axis per tensor dimension,
+          // we expect at most one axis per dimension sharding
+          if (!inputAxes.empty() && !outputAxes.empty()) {
+            std::string inputAxisName = inputAxes[0].getName().str();
+            std::string outputAxisName = outputAxes[0].getName().str();
+
+            if (inputAxisName != outputAxisName) {
+              // This dimension's sharding axis changed
+              // We need to swap the coordinates for these axes
+              auto inputAxisIndexIt = axisNameToIndex.find(inputAxisName);
+              auto outputAxisIndexIt = axisNameToIndex.find(outputAxisName);
+
+              if (inputAxisIndexIt != axisNameToIndex.end() &&
+                  outputAxisIndexIt != axisNameToIndex.end()) {
+                int inputAxisIndex = inputAxisIndexIt->second;
+                int outputAxisIndex = outputAxisIndexIt->second;
+
+                if (inputAxisIndex >= 0 &&
+                    inputAxisIndex < static_cast<int>(outputCoords.size()) &&
+                    outputAxisIndex >= 0 &&
+                    outputAxisIndex < static_cast<int>(outputCoords.size())) {
+                  std::swap(outputCoords[inputAxisIndex],
+                            outputCoords[outputAxisIndex]);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return outputCoords;
   }
 };
 
