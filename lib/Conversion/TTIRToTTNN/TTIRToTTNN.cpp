@@ -1673,9 +1673,73 @@ public:
 
     auto device = ::ttnn::utils::getOrInsertDevice(rewriter, op);
 
-    rewriter.replaceOpWithNewOp<ttnn::CollectivePermuteOp>(
-        op, this->getTypeConverter()->convertType(op.getType()),
-        adaptor.getInput(), device, adaptor.getSourceTargetPairs());
+    // Get the input tensor type to extract attributes for creating the base
+    // tensor
+    auto inputType = mlir::cast<RankedTensorType>(adaptor.getInput().getType());
+
+    // Get ttnn::TTNNLayoutAttr of the input type
+    ttnn::TTNNLayoutAttr layoutAttr =
+        mlir::cast<ttnn::TTNNLayoutAttr>(inputType.getEncoding());
+
+    // Get the shape of the input tensor
+    ttnn::ShapeAttr shapeAttr = ttnn::ShapeAttr::get(
+        rewriter.getContext(),
+        llvm::SmallVector<int64_t, 4>(inputType.getShape().begin(),
+                                      inputType.getShape().end()));
+
+    // Get data type, tensor layout, and memory config from the input tensor
+    ttcore::DataTypeAttr dTypeAttr = ttcore::DataTypeAttr::get(
+        rewriter.getContext(), layoutAttr.getDataType());
+    ttnn::BufferType bufferType = layoutAttr.getBufferType();
+    ttnn::LayoutAttr tensorLayoutAttr =
+        ttnn::LayoutAttr::get(op.getContext(), layoutAttr.getLayout());
+    ttnn::TensorMemoryLayoutAttr memLayout = layoutAttr.getMemLayout();
+
+    // MemoryConfigAttr only exists if memLayout is *not* null
+    ttnn::MemoryConfigAttr memoryConfigAttr =
+        memLayout ? ttnn::MemoryConfigAttr::get(
+                        op.getContext(), memLayout,
+                        ttnn::BufferTypeAttr::get(op.getContext(), bufferType),
+                        std::nullopt)
+                  : nullptr;
+
+    // Create the initial/base tensor with ttnn::zeros op
+    auto baseTensor = rewriter.create<ttnn::ZerosOp>(
+        op.getLoc(), this->getTypeConverter()->convertType(op.getType()),
+        device, shapeAttr, dTypeAttr, tensorLayoutAttr, memoryConfigAttr);
+
+    // Get mesh shape from the device for coordinate conversion
+    auto meshDevice = ttcore::lookupDevice(op);
+    llvm::SmallVector<int64_t> meshShape{meshDevice.getMeshShape()};
+
+    // Extract source_target_pairs from the operation
+    auto sourceTargetPairs = adaptor.getSourceTargetPairs();
+    auto sourceTargetPairsValues = sourceTargetPairs.getValues<int64_t>();
+
+    // Create a vector to store the result tensor for each point-to-point
+    // operation
+    mlir::Value resultTensor = baseTensor;
+
+    // Iterate over each source-target pair and create ttnn::PointToPointOp
+    for (size_t i = 0; i < sourceTargetPairsValues.size(); i += 2) {
+      int64_t sourceDevice = sourceTargetPairsValues[i];
+      int64_t targetDevice = sourceTargetPairsValues[i + 1];
+
+      // Convert device IDs to coordinates using linearIdToCoord
+      auto sendCoord = rewriter.getDenseI64ArrayAttr(
+          ttmlir::utils::linearIdToCoord(sourceDevice, meshShape));
+      auto receiveCoord = rewriter.getDenseI64ArrayAttr(
+          ttmlir::utils::linearIdToCoord(targetDevice, meshShape));
+
+      // Create ttnn::PointToPointOp
+      // The sender is the input tensor, the receiver is the current result
+      // tensor
+      resultTensor = rewriter.create<ttnn::PointToPointOp>(
+          op.getLoc(), this->getTypeConverter()->convertType(op.getType()),
+          adaptor.getInput(), sendCoord, receiveCoord, resultTensor);
+    }
+
+    rewriter.replaceOp(op, resultTensor);
 
     return success();
   }
