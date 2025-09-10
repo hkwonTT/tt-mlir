@@ -30,6 +30,7 @@ namespace tt.target.ttnn;
 
 union OpType {
   AllGatherOp,
+  AllReduceOp,
   ArangeOp,
   BatchNormOp,
   BeginTraceCaptureOp,
