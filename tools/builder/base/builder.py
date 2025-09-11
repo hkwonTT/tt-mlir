@@ -267,6 +267,7 @@ class Builder:
 
     def _get_loc_of_extra_file_callee(self, id: int = 0) -> Location:
         stack = inspect.stack()
+        stack = stack[1:]
         caller_filename = stack[1].filename
 
         while len(stack) > 0 and stack[0].filename == caller_filename:
