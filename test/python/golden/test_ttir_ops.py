@@ -3409,7 +3409,9 @@ def test_mesh_shard_devices(
     ],
     ids=shape_str,
 )
-@pytest.mark.parametrize("mesh_shape", [(2, 4), (1, 8), (1, 2)], ids=shape_str)
+@pytest.mark.parametrize(
+    "mesh_shape", [(2, 4), (1, 8), (1, 2), (1, 32), (8, 4)], ids=shape_str
+)
 @pytest.mark.parametrize("all_gather_dim", range(4))
 @pytest.mark.parametrize("cluster_axis", [0, 1])
 @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float32], ids=["bf16", "f32"])
@@ -3467,7 +3469,9 @@ def test_all_gather(
     ],
     ids=shape_str,
 )
-@pytest.mark.parametrize("mesh_shape", [(2, 4), (1, 8), (1, 2)], ids=shape_str)
+@pytest.mark.parametrize(
+    "mesh_shape", [(2, 4), (1, 8), (1, 2), (1, 32), (8, 4)], ids=shape_str
+)
 @pytest.mark.parametrize("cluster_axis", [0, 1])
 @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float32], ids=["bf16", "f32"])
 def test_all_reduce(
@@ -3520,7 +3524,9 @@ def test_all_reduce(
     ],
     ids=shape_str,
 )
-@pytest.mark.parametrize("mesh_shape", [(2, 4), (1, 8), (1, 2)], ids=shape_str)
+@pytest.mark.parametrize(
+    "mesh_shape", [(2, 4), (1, 8), (1, 2), (1, 32), (8, 4)], ids=shape_str
+)
 @pytest.mark.parametrize("scatter_dim", [0, 1, 2, 3])
 @pytest.mark.parametrize("cluster_axis", [0, 1])
 @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float32], ids=["bf16", "f32"])
@@ -3644,6 +3650,16 @@ def test_collective_permute(
         ((4, 2), ((0, 1), (2, 3), (4, 5), (6, 7))),
         ((1, 2), ((0, 1),)),
         ((2, 1), ((0, 1),)),
+        ((1, 32), range(32)),
+        (
+            (8, 4),
+            (
+                (0, 1, 2, 3, 4, 5, 6, 7),
+                (8, 9, 10, 11, 12, 13, 14, 15),
+                (16, 17, 18, 19, 20, 21, 22, 23),
+                (24, 25, 26, 27, 28, 29, 30, 31),
+            ),
+        ),
     ],
 )
 @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float32], ids=["bf16", "f32"])
@@ -3705,6 +3721,16 @@ def test_all_to_all(
         ((1, 8), [(0, 1, 2, 3, 4, 5, 6, 7)]),
         ((1, 2), ((0, 1),)),
         ((2, 1), ((0, 1),)),
+        ((1, 32), range(32)),
+        (
+            (8, 4),
+            (
+                (0, 1, 2, 3, 4, 5, 6, 7),
+                (8, 9, 10, 11, 12, 13, 14, 15),
+                (16, 17, 18, 19, 20, 21, 22, 23),
+                (24, 25, 26, 27, 28, 29, 30, 31),
+            ),
+        ),
     ],
 )
 @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float32], ids=["bf16", "f32"])
