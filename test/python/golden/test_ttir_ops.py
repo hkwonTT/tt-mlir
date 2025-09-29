@@ -7,7 +7,6 @@ import torch
 from typing import Callable, List, Optional, Tuple, Union
 from collections import OrderedDict
 from functools import reduce
-from itertools import product
 import operator
 from conftest import x86_only
 
@@ -3568,50 +3567,41 @@ def test_reduce_scatter(
     [
         (1, 1, 32, 64),
         (1, 32, 64),
+        (32, 64, 1, 1),
+        (1, 32, 64, 1),
         (32, 64),
+        (30, 60),
         (5, 11),
     ],
     ids=shape_str,
 )
+@pytest.mark.parametrize("mesh_shape", [(2, 4), (1, 8), (1, 2)], ids=shape_str)
 @pytest.mark.parametrize(
-    "mesh_shape", [(2, 4), (1, 8), (1, 2), (1, 32), (8, 4)], ids=shape_str
-)
-@pytest.mark.parametrize("cluster_axis", [0, 1])
-@pytest.mark.parametrize(
-    "permute_pattern", ["rotate_right", "rotate_left", "rotate_right_partial"]
+    "source_target_pairs",
+    [
+        pytest.param(
+            [(0, 1)], marks=pytest.mark.fails_golden
+        ),  # https://github.com/tenstorrent/tt-mlir/issues/4323
+        [(0, 1), (1, 0)],
+        [(0, 1), (1, 2), (2, 3), (3, 0)],
+        [(0, 1), (1, 2), (2, 3), (3, 0), (4, 5), (5, 6), (6, 7), (7, 4)],
+        [(0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (6, 7), (7, 0)],
+        [(0, 4), (1, 5), (2, 6), (3, 7), (4, 0), (5, 1), (6, 2), (7, 3)],
+        [(0, 2), (1, 3), (4, 6), (5, 7), (2, 0), (3, 1), (6, 4), (7, 5)],
+        [(0, 7), (1, 6), (2, 5), (3, 4), (4, 3), (5, 2), (6, 1), (7, 0)],
+    ],
 )
 @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float32], ids=["bf16", "f32"])
 def test_collective_permute(
     test_shape: Shape,
     mesh_shape: Tuple[int, int],
-    cluster_axis: int,
-    permute_pattern: str,
+    source_target_pairs: List[Tuple[int, int]],
     dtype: torch.dtype,
     request,
 ):
-    def make_rotate_pairs(shape, axis, ror=True):
-        n = len(shape)
-        axis %= n
-        strides = [1] * n
-        for i in range(n - 2, -1, -1):
-            strides[i] = strides[i + 1] * shape[i + 1]
-        others = [i for i in range(n) if i != axis]
-        ranges = [range(shape[i]) for i in others] or [range(1)]
-        pairs = []
-        for fixed in product(*ranges):
-            base = sum(fixed[j] * strides[others[j]] for j in range(len(others)))
-            step = strides[axis]
-            m = [base + k * step for k in range(shape[axis])]
-            direction = 1 if ror else -1
-            pairs += [(m[i], m[(i + direction) % len(m)]) for i in range(len(m))]
-        return pairs
-
-    if "rotate_right" in permute_pattern:
-        source_target_pairs = make_rotate_pairs(test_shape, cluster_axis, True)
-    elif "rotate_left" in permute_pattern:
-        source_target_pairs = make_rotate_pairs(test_shape, cluster_axis, False)
-    if "partial" in permute_pattern:
-        source_target_pairs = source_target_pairs[0::2]
+    max_id = reduce(operator.mul, mesh_shape, 1)
+    if not all(pair[0] < max_id and pair[1] < max_id for pair in source_target_pairs):
+        pytest.skip("Source and target pairs are out of range")
 
     def collective_permute(mesh_shard_in: Operand, builder: TTIRBuilder):
         return builder.collective_permute(
