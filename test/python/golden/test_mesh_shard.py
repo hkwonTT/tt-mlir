@@ -8,9 +8,10 @@ from typing import List, Tuple, OrderedDict, Callable
 
 import itertools
 
-from builder.base.builder import Operand
+from builder.base.builder import Operand, Shape, TypeInfo
+from builder.base.builder_golden import BuilderGoldenTensor
 from builder.ttir.ttir_builder import TTIRBuilder
-from builder.base.builder_utils import compile_ttir_to_flatbuffer
+from builder.base.builder_utils import compile_and_execute_ttir
 from test_utils import shape_str
 
 pytestmark = pytest.mark.frontend("ttir")
@@ -42,7 +43,6 @@ def devices_devices(
     )
     input_tensor = builder._get_golden_tensor(in0)
     golden_output_tensor = torch.neg(input_tensor)
-    builder.set_graph_input_output([input_tensor], [golden_output_tensor])
 
     return output
 
@@ -77,7 +77,6 @@ def devices_replicate(
             golden_output_tensor = torch.chunk(
                 golden_output_tensor, shard_size, dim=idx
             )[0]
-    builder.set_graph_input_output([input_tensor], [golden_output_tensor])
 
     return output
 
@@ -113,7 +112,6 @@ def replicate_devices(
                 [golden_output_tensor.clone() for _ in range(shard_size)],
                 dim=idx,
             )
-    builder.set_graph_input_output([input_tensor], [golden_output_tensor])
 
     return output
 
@@ -140,7 +138,7 @@ def replicate_devices(
     [devices_devices, devices_replicate, replicate_devices],
     ids=lambda f: f.__name__,
 )
-def test_mesh_shard_devices(
+def test_mesh_shard_2D_mesh(
     input_rank: int,
     shard_dim_0: int,
     shard_dim_1: int,
@@ -149,6 +147,7 @@ def test_mesh_shard_devices(
     tile_size: int,
     test_case: Callable,
     request,
+    device,
 ):
     if shard_dim_0 >= input_rank or shard_dim_1 >= input_rank:
         pytest.skip("shard_dim is out of range, skipping test.")
@@ -179,10 +178,11 @@ def test_mesh_shard_devices(
     )
     test_fn.__name__ = test_case.__name__
 
-    compile_ttir_to_flatbuffer(
+    compile_and_execute_ttir(
         test_fn,
         [input_shape],
         mesh_name="mesh",
+        device=device,
         mesh_dict=OrderedDict([("x", mesh_shape[0]), ("y", mesh_shape[1])]),
         test_base=request.node.name,
         output_root=request.config.getoption("--path"),
@@ -207,7 +207,7 @@ def test_mesh_shard_devices(
     [devices_devices, devices_replicate, replicate_devices],
     ids=lambda f: f.__name__,
 )
-def test_mesh_shard_3D(
+def test_mesh_shard_3D_mesh(
     input_rank: int,
     shard_dim_0: int,
     shard_dim_1: int,
@@ -217,6 +217,7 @@ def test_mesh_shard_3D(
     tile_size: int,
     test_case: Callable,
     request,
+    device,
 ):
     if (
         shard_dim_0 >= input_rank
@@ -255,13 +256,14 @@ def test_mesh_shard_3D(
     )
     test_fn.__name__ = test_case.__name__
 
-    compile_ttir_to_flatbuffer(
+    compile_and_execute_ttir(
         test_fn,
         [input_shape],
         mesh_name="mesh",
         mesh_dict=OrderedDict(
             [("x", mesh_shape[0]), ("y", mesh_shape[1]), ("z", mesh_shape[2])]
         ),
+        device=device,
         test_base=request.node.name,
         output_root=request.config.getoption("--path"),
         system_desc_path=request.config.getoption("--sys-desc"),
