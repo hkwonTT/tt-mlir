@@ -18,8 +18,8 @@ void run(const ::tt::target::ttnn::AggregateTensorOp *op,
   const ::ttnn::Tensor &input = tensorPool.getTTNNTensorAndValidate(op->in());
 
   LOG_ASSERT(
-      ttnn::utils::isOnDevice(input.storage_type()),
-      "Input of aggregate_tensor must be DEVICE. id:", op->in()->global_id());
+      ttnn::utils::isOnHost(input.storage_type()),
+      "Input of aggregate_tensor must be HOST. id:", op->in()->global_id());
   ::ttnn::MeshDevice &meshDevice = context.getMeshDevice();
 
   MeshComposerConfig meshComposerConfig;

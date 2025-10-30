@@ -45,8 +45,8 @@ void run(const ::tt::target::ttnn::DistributeTensorOp *op,
   meshMapperConfig.mesh_shape_override = ::ttnn::MeshShape(meshShapeOverride);
   std::unique_ptr<TensorToMesh> meshMapper =
       ::ttnn::distributed::create_mesh_mapper(meshDevice, meshMapperConfig);
-  ::ttnn::Tensor out = ::ttnn::distributed::distribute_tensor(
-      input, *meshMapper, meshDevice, cqId);
+  ::ttnn::Tensor out =
+      ::ttnn::distributed::distribute_tensor(input, *meshMapper);
 
   tensorPool.insertTTNNTensorAndValidate(op->out(), out);
 }
