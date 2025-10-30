@@ -1572,8 +1572,8 @@ public:
       return failure();
     }
     SmallVector<uint32_t, 2> meshShape;
-    meshShape.push_back(srcMeshShapeAttr.getX());
     meshShape.push_back(srcMeshShapeAttr.getY());
+    meshShape.push_back(srcMeshShapeAttr.getX());
 
     mlir::MLIRContext *context = op.getContext();
     SmallVector<ttnn::PlacementAttr, 2> placements;
@@ -1620,8 +1620,8 @@ public:
       return failure();
     }
     SmallVector<uint32_t, 2> fullMeshShape = {
-        static_cast<uint32_t>(meshShapeAttr.getX()),
-        static_cast<uint32_t>(meshShapeAttr.getY())};
+        static_cast<uint32_t>(meshShapeAttr.getY()),
+        static_cast<uint32_t>(meshShapeAttr.getX())};
 
     SmallVector<int32_t, 2> composerDims;
     SmallVector<uint32_t, 2> targetSubMeshShape;
