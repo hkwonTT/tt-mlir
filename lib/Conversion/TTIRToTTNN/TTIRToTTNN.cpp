@@ -1730,6 +1730,8 @@ public:
           ttmlir::utils::linearIdToCoord(sourceDevice, meshShape));
       auto receiveCoord = rewriter.getDenseI64ArrayAttr(
           ttmlir::utils::linearIdToCoord(targetDevice, meshShape));
+      assert(sendCoord != receiveCoord &&
+             "Source and target coordinates cannot be the same");
 
       // Create ttnn::PointToPointOp
       // The sender is the input tensor, the receiver is the current result

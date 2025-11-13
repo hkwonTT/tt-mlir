@@ -2403,36 +2403,6 @@ public:
 };
 } // namespace
 
-// CollectivePermuteOp conversion pattern
-//
-namespace {
-class CollectivePermuteOpConversionPattern
-    : public TTNNToEmitCBaseOpConversionPattern<
-          mlir::tt::ttnn::CollectivePermuteOp> {
-public:
-  using TTNNToEmitCBaseOpConversionPattern<
-      mlir::tt::ttnn::CollectivePermuteOp>::TTNNToEmitCBaseOpConversionPattern;
-
-  LogicalResult
-  matchAndRewrite(mlir::tt::ttnn::CollectivePermuteOp srcOp,
-                  mlir::tt::ttnn::CollectivePermuteOp::Adaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override {
-
-    rewriter.create<emitc::VerbatimOp>(
-        srcOp.getLoc(),
-        "assert(0 && \"Collective permute operation is "
-        "not supported in emitc yet.\"); // ::ttnn::collective_permute");
-    ttnn_to_emitc::EmitCTTNNEmitter<mlir::tt::ttnn::CollectivePermuteOp>
-        emitter(srcOp, adaptor, rewriter);
-    llvm::SmallVector<mlir::Attribute> args{
-        emitter.emit(srcOp.getInput()),
-    };
-    emitter.replaceOp(*this, args);
-    return success();
-  }
-};
-} // namespace
-
 // SliceStaticOp conversion pattern
 //
 namespace {

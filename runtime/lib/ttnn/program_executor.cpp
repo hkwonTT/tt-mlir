@@ -6,7 +6,6 @@
 
 #include "operations/cache/load_cached.h"
 #include "operations/ccl/all_gather.h"
-#include "operations/ccl/collective_permute.h"
 #include "operations/ccl/mesh_shard.h"
 #include "operations/ccl/point_to_point.h"
 #include "operations/ccl/reduce_scatter.h"
@@ -368,10 +367,6 @@ void ProgramExecutor::runOperation(const ::tt::target::ttnn::Operation *op) {
   }
   case ::tt::target::ttnn::OpType::ReduceScatterOp: {
     return operations::ccl::run(op->type_as_ReduceScatterOp(), getContext());
-  }
-  case ::tt::target::ttnn::OpType::CollectivePermuteOp: {
-    return operations::ccl::run(op->type_as_CollectivePermuteOp(),
-                                getContext());
   }
   case ::tt::target::ttnn::OpType::MeshShardOp: {
     return operations::ccl::run(op->type_as_MeshShardOp(), getContext());

@@ -774,20 +774,6 @@ createOp(FlatbufferObjectCache &cache, ScatterOp op) {
                                              memoryConfig);
 }
 
-::flatbuffers::Offset<::tt::target::ttnn::CollectivePermuteOp>
-createOp(FlatbufferObjectCache &cache, CollectivePermuteOp op) {
-  auto input = cache.at<::tt::target::ttnn::TensorRef>(
-      getOperandThroughDPSOps(op.getInput()));
-  auto output = cache.getOrCreate(op.getResult(), tensorValueToFlatbuffer);
-  auto device = getOperandThroughDPSOps(op.getDevice());
-  auto sourceTargetPairs = op.getSourceTargetPairs().getValues<int64_t>();
-  std::vector<int64_t> sourceTargetPairsVec(sourceTargetPairs.begin(),
-                                            sourceTargetPairs.end());
-  return ::tt::target::ttnn::CreateCollectivePermuteOp(
-      *cache.fbb, input, output, cache.at<::tt::target::DeviceRef>(device),
-      cache.fbb->CreateVector<int64_t>(sourceTargetPairsVec));
-}
-
 ::flatbuffers::Offset<::tt::target::ttnn::MeshShardOp>
 createOp(FlatbufferObjectCache &cache, MeshShardOp op) {
   auto input = cache.at<::tt::target::ttnn::TensorRef>(
@@ -2909,11 +2895,6 @@ emitTTNNOperation(FlatbufferObjectCache &cache, Operation *op,
   if (auto scatterOp = dyn_cast<ScatterOp>(op); scatterOp) {
     return createOperation(cache, createOp(cache, scatterOp), debugString,
                            locInfo);
-  }
-  if (auto collectivePermuteOp = dyn_cast<CollectivePermuteOp>(op);
-      collectivePermuteOp) {
-    return createOperation(cache, createOp(cache, collectivePermuteOp),
-                           debugString, locInfo);
   }
   if (auto meshShardOp = dyn_cast<MeshShardOp>(op); meshShardOp) {
     return createOperation(cache, createOp(cache, meshShardOp), debugString,

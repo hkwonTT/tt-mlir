@@ -10,7 +10,6 @@ import math
 ttnn.MeshShardDirection = ttnn_supplemental.MeshShardDirection
 ttnn.MeshShardType = ttnn_supplemental.MeshShardType
 ttnn.mesh_shard = ttnn_supplemental.mesh_shard
-ttnn.collective_permute = ttnn_supplemental.collective_permute
 
 
 class DeviceGetter:
