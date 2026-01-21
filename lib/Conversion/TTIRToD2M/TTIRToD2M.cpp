@@ -51,8 +51,17 @@ protected:
       return false;
     }
 
-    return mlir::isa_and_nonnull<ttnn::TTNNLayoutAttr>(tensor.getEncoding()) ||
-           mlir::isa_and_nonnull<ttnn::TTNNNDLayoutAttr>(tensor.getEncoding());
+    bool result = mlir::isa_and_nonnull<ttnn::TTNNLayoutAttr>(tensor.getEncoding()) ||
+                  mlir::isa_and_nonnull<ttnn::TTNNNDLayoutAttr>(tensor.getEncoding());
+
+    llvm::errs() << "tensor: ";
+    tensor.print(llvm::errs());
+    llvm::errs() << "\n";
+    llvm::errs() << "encoding: ";
+    tensor.getEncoding().print(llvm::errs());
+    llvm::errs() << "\n";
+    llvm::errs() << "isTTNNTensor: " << result << "\n";
+    return result;
   }
 
   template <typename LayoutAttr>
@@ -301,9 +310,12 @@ protected:
 
     llvm::SmallVector<int64_t> shardedShape =
         layout.getDeviceShape(simpleGrid, tileShape);
-
     auto emptyOp = rewriter.create<d2m::EmptyOp>(value.getLoc(), shardedShape,
                                                  elementType, layout);
+
+    llvm::errs() << "op 1: ";
+    emptyOp->print(llvm::errs());
+    llvm::errs() << "\n";
     return rewriter.create<d2m::ToLayoutOp>(value.getLoc(), value, emptyOp)
         ->getResult(0);
   }
@@ -338,6 +350,10 @@ protected:
     }
     auto output =
         rewriter.create<d2m::EmptyOp>(fromValue.getLoc(), toResultType);
+
+    llvm::errs() << "op 2: ";
+    output->print(llvm::errs());
+    llvm::errs() << "\n";
     return rewriter.create<d2m::ToLayoutOp>(fromValue.getLoc(), fromValue,
                                             output);
   }
@@ -1442,6 +1458,9 @@ public:
     auto storage = rewriter.create<d2m::EmptyOp>(
         loc, permuted.physicalShape, inputTensorType.getElementType(),
         resultLayout);
+    llvm::errs() << "op 3: ";
+    storage->print(llvm::errs());
+    llvm::errs() << "\n";
     auto stream =
         rewriter.create<d2m::StreamLayoutOp>(loc, viewType, inputs[0], storage);
     inputs[0] = stream.getResult();
@@ -1585,6 +1604,10 @@ class D2MToLayoutOpRewriter : public OpConversionPattern<ttir::ToLayoutOp> {
     Value empty = rewriter.create<d2m::EmptyOp>(op.getLoc(), outType.getShape(),
                                                 outType.getElementType(),
                                                 outType.getEncoding());
+
+    llvm::errs() << "op 4: ";
+    empty.print(llvm::errs());
+    llvm::errs() << "\n";
     auto newOp = rewriter.create<d2m::ToLayoutOp>(op.getLoc(),
                                                   adaptor.getInput(), empty);
     rewriter.replaceOp(op, newOp.getResult(0));
@@ -1682,6 +1705,9 @@ public:
 
     auto storage =
         rewriter.create<d2m::EmptyOp>(op.getLoc(), outputs[0].getType());
+    llvm::errs() << "op 5: ";
+    storage->print(llvm::errs());
+    llvm::errs() << "\n";
     auto view = rewriter.create<d2m::StreamLayoutOp>(
         op.getLoc(), newOutTy, inputs[0], storage.getResult());
 
