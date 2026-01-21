@@ -1,0 +1,53 @@
+{
+  // .vscode/launch.json
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "gdb: ttmlir-opt (optimize issue)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/bin/ttmlir-opt",
+      "args": [
+        "--ttir-to-ttmetal-pipeline=ttnn-mode=true",
+        "single_exp.mlir"
+      ],
+      "cwd": "/localdev/hkwon/working/d2m_spatial$",
+      "stopAtEntry": false,
+      "externalConsole": false,
+
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/local/bin/gdb",
+
+      "setupCommands": [
+        { "text": "-enable-pretty-printing" },
+        { "text": "set print asm-demangle on" }
+      ]
+    },
+    {
+      "name": "gdb-python-ttrt",
+      "type": "cppdbg",
+      "request": "launch",
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/local/bin/gdb",
+      "program": "/opt/ttmlir-toolchain/venv/bin/python",
+      "args": [
+        "/opt/ttmlir-toolchain/venv/bin/ttrt",
+        "run",
+        "build/test/ttmlir/Silicon/TTNN/llmbox/perf/Output/all_reduce.mlir.tmp.ttnn"
+      ],
+      "environment": [
+        { "name": "TT_METAL_CLEAR_L1", "value": "1" },
+        { "name": "TT_METAL_DEVICE_PROFILER", "value": "0" }
+      ],
+      "cwd": "/localdev/hkwon/tt-mlir",
+      "stopAtEntry": false,
+      "setupCommands": [
+        { "description": "Enable pretty-printing",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true }
+      ],
+      "symbolSearchPath": "/opt/mytool/obj:/usr/lib/debug",
+      "externalConsole": false
+    }
+  ]
+}
