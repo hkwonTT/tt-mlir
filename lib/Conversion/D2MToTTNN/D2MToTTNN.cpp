@@ -361,6 +361,18 @@ public:
                   ConversionPatternRewriter &rewriter) const final {
     MLIRContext *ctx = rewriter.getContext();
     auto tensorType = cast<RankedTensorType>(op.getResult().getType());
+    auto loc = op.getLoc();
+
+    llvm::errs() << "loc: ";
+    loc.print(llvm::errs());
+    llvm::errs() << "\n";
+
+    llvm::errs() << "op: ";
+    op->print(llvm::errs());
+    llvm::errs() << "\n";
+
+    llvm::errs() << "tensorType: " << tensorType << "\n";
+
     auto layoutAttr = cast<ttnn::TTNNLayoutAttr>(tensorType.getEncoding());
     auto shape = ttnn::ShapeAttr::get(ctx, tensorType.getShape());
     auto dtype = ttcore::DataTypeAttr::get(ctx, layoutAttr.getDataType());
