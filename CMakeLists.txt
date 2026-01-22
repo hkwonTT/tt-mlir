@@ -32,7 +32,7 @@ set(MLIR_BINDINGS_PYTHON_NB_DOMAIN "ttmlir" CACHE STRING
 option(TT_RUNTIME_ENABLE_PERF_TRACE "Enable performance mode" OFF)
 option(TTMLIR_ENABLE_RUNTIME "Enable runtime" OFF)
 option(TTMLIR_ENABLE_PYKERNEL "Enable python kernels" OFF)
-option(TTMLIR_ENABLE_TTNN_JIT "Enable ttnn-jit" OFF)
+option(TTMLIR_ENABLE_TTNN_JIT "Enable ttnn-jit" ON)
 option(TTMLIR_ENABLE_TTRT "Enable ttrt" ON)
 option(TTMLIR_ENABLE_STABLEHLO "Enable StableHLO support" OFF)
 option(TTMLIR_ENABLE_TTIRTONVVM "Enable lowering TTIR to NVVM" OFF)
