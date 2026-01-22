@@ -367,18 +367,6 @@ public:
     MLIRContext *ctx = rewriter.getContext();
     auto tensorType = cast<RankedTensorType>(op.getResult().getType());
     auto encoding = tensorType.getEncoding();
-    auto loc = op.getLoc();
-
-    llvm::errs() << "loc: ";
-    loc.print(llvm::errs());
-    llvm::errs() << "\n";
-
-    llvm::errs() << "op: ";
-    op->print(llvm::errs());
-    llvm::errs() << "\n";
-
-    llvm::errs() << "tensorType: " << tensorType << "\n";
-
     auto shape = ttnn::ShapeAttr::get(ctx, tensorType.getShape());
 
     ttcore::DataTypeAttr dtype;
@@ -388,14 +376,6 @@ public:
     // Reuses the existing ttnn.get_device op if present, else create one.
     auto device = ttnn::utils::getOrInsertDevice(rewriter, op);
     auto deviceAttr = ttcore::lookupDevice(op);
-
-    llvm::errs() << "encoding: ";
-    encoding.print(llvm::errs());
-    llvm::errs() << "\n";
-    auto ttnnlayoutattr = mlir::dyn_cast<ttnn::TTNNLayoutAttr>(encoding);
-    llvm::errs() << "ttnnlayoutattr: ";
-    llvm::errs() << ttnnlayoutattr << "\n";
-    llvm::errs() << "\n";
 
     // Handle both TTNNLayoutAttr and TTNNNDLayoutAttr
     if (auto layoutAttr = mlir::dyn_cast<ttnn::TTNNLayoutAttr>(encoding)) {
@@ -419,9 +399,6 @@ public:
 
     rewriter.replaceOpWithNewOp<ttnn::EmptyOp>(op, tensorType, device, shape,
                                                dtype, layout, memcfg);
-    llvm::errs() << "replaced op: ";
-    op->print(llvm::errs());
-    llvm::errs() << "\n";
     return success();
   };
 };

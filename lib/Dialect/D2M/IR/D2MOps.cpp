@@ -65,19 +65,7 @@ mlir::LogicalResult d2m::EmptyOp::bufferize(
     return success();
   }
 
-  auto *op = getOperation();
-  auto loc = op->getLoc();
-
   // Don't bufferize if tensor has a ttnn_layout; lowering to ttnn generic.
-  llvm::errs() << "loc: ";
-  loc.print(llvm::errs());
-  llvm::errs() << "\n";
-
-  llvm::errs() << "op: ";
-  op->print(llvm::errs());
-  llvm::errs() << "\n";
-
-  llvm::errs() << "tensorType: " << getResult().getType().getEncoding() << "\n";
   if (options.allowUnknownOps &&
       (mlir::isa<ttnn::TTNNLayoutAttr>(getResult().getType().getEncoding()) ||
        mlir::isa<ttnn::TTNNNDLayoutAttr>(
