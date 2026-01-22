@@ -168,6 +168,12 @@ void populatePassesModule(nb::module_ &m) {
               false);
         }
 
+        // Print IR before ConvertTTNNToTTIRPass
+        llvm::errs()
+            << "// -----// IR Dump Before ConvertTTNNToTTIRPass //----- //\n";
+        moduleOp->print(llvm::errs(), mlir::OpPrintingFlags());
+        llvm::errs() << "\n";
+
         pm.addPass(tt::createConvertTTNNToTTIRPass());
 
         const auto *pipeline =
