@@ -314,17 +314,9 @@ void createTTIRToTTMetalPipeline(OpPassManager &pm,
 
 void createTTIRToTTMetalPipelineDebug(
     OpPassManager &pm, const TTIRToTTMetalPipelineOptions &options) {
-  OpPassManager &devicePm =
-      pm.nest<ttcore::DeviceModuleOp>().nest<mlir::ModuleOp>();
-
-  // Run regular ttir to ttmetal pipelines on IR in DeviceModule.
-  createTTIRToTTMetalFrontendPipelineDebug(devicePm, options);
-  createTTIRToTTMetalMiddleendPipeline(devicePm, options);
-  createTTIRToTTMetalBackendPipeline(devicePm, options);
-
-  // Run lowering to LLVM pass.
-  ttir::TTIRToLLVMCPUPipelineOptions ttirToCPUOptions;
-  ttir::createTTIRToLLVMCPUPipeline(pm, ttirToCPUOptions);
+  createTTIRToTTMetalFrontendPipelineDebug(pm, options);
+  createTTIRToTTMetalMiddleendPipeline(pm, options);
+  createTTIRToTTMetalBackendPipeline(pm, options);
 }
 //===----------------------------------------------------------------------===//
 // Pipeline registration.
