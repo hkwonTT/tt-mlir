@@ -114,6 +114,46 @@ void createTTIRToTTMetalFrontendPipeline(
   pm.addPass(d2m::createD2MMaterializeViewReturns());
 }
 
+void createTTIRToTTMetalFrontendPipelineDebug(
+    OpPassManager &pm, const TTIRToTTMetalPipelineOptions &options) {
+  // // Create multi-device tensor annotation for graph with mesh.
+  // pm.addPass(ttir::createTTIRMultiDeviceTensorAnnotation());
+  // ttcore::TTCoreRegisterDevicePassOptions registerDeviceOptions;
+  // {
+  // registerDeviceOptions.systemDescPath = options.systemDescPath;
+  // registerDeviceOptions.mockSystemDescArch = options.mockSystemDescArch;
+  // registerDeviceOptions.meshShape = llvm::to_vector(options.meshShape);
+  // }
+  // pm.addPass(ttcore::createTTCoreRegisterDevicePass(registerDeviceOptions));
+  // pm.addPass(tt::createTTIRToTTIRDecompositionPass());
+  // pm.addPass(createCanonicalizerPassWithOptions(options));
+  // if (!options.globalDataFormatTarget.empty()) {
+  // d2m::D2MGlobalDataFormatConversionOptions globalFormatOptions;
+  // { globalFormatOptions.targetFormat = options.globalDataFormatTarget; }
+  // pm.addPass(d2m::createD2MGlobalDataFormatConversion(globalFormatOptions));
+  // }
+  // pm.addPass(d2m::createD2MDecomposeComplexPermute());
+  // tt::TTIRToD2MOptions toD2MOptions;
+  // {
+  // toD2MOptions.defaultInputMemSpace = options.defaultInputMemSpace;
+  // toD2MOptions.defaultOutputMemSpace = options.defaultOutputMemSpace;
+  // toD2MOptions.ttnnMode = options.ttnnMode;
+  // toD2MOptions.collapseTensorsTo2D = options.collapseTensors;
+  // }
+  // pm.addPass(tt::createTTIRToD2MPass(toD2MOptions));
+  pm.addPass(d2m::createD2MScalarizeConstTensors());
+  d2m::D2MGridSelectionOptions gridOptOptions;
+  {
+    gridOptOptions.overrideDeviceShape =
+        llvm::to_vector(options.overrideDeviceShape);
+  }
+  pm.addPass(d2m::createD2MMaterializeViewReturns());
+  pm.addPass(d2m::createD2MGridSelection(gridOptOptions));
+  pm.addPass(createCanonicalizerPassWithOptions(options));
+  pm.addPass(d2m::createD2MLowerToLayout());
+  pm.addPass(d2m::createD2MMaterializeViewReturns());
+}
+
 void createTTIRToTTMetalMiddleendPipeline(
     OpPassManager &pm, const TTIRToTTMetalPipelineOptions &options) {
   d2m::D2MElementwiseFusionOptions elementwiseFusionOptions;
@@ -272,6 +312,20 @@ void createTTIRToTTMetalPipeline(OpPassManager &pm,
   ttir::createTTIRToLLVMCPUPipeline(pm, ttirToCPUOptions);
 }
 
+void createTTIRToTTMetalPipelineDebug(
+    OpPassManager &pm, const TTIRToTTMetalPipelineOptions &options) {
+  OpPassManager &devicePm =
+      pm.nest<ttcore::DeviceModuleOp>().nest<mlir::ModuleOp>();
+
+  // Run regular ttir to ttmetal pipelines on IR in DeviceModule.
+  createTTIRToTTMetalFrontendPipelineDebug(devicePm, options);
+  createTTIRToTTMetalMiddleendPipeline(devicePm, options);
+  createTTIRToTTMetalBackendPipeline(devicePm, options);
+
+  // Run lowering to LLVM pass.
+  ttir::TTIRToLLVMCPUPipelineOptions ttirToCPUOptions;
+  ttir::createTTIRToLLVMCPUPipeline(pm, ttirToCPUOptions);
+}
 //===----------------------------------------------------------------------===//
 // Pipeline registration.
 //===----------------------------------------------------------------------===//
@@ -293,5 +347,9 @@ void registerTTMetalPipelines() {
       "ttir-bufferization-pipeline",
       "Pipeline bufferizing ttir ops on tensors to ops on buffers (memrefs).",
       tt::ttmetal::createTTIRBufferizationPipeline);
+  mlir::PassPipelineRegistration<tt::ttmetal::TTIRToTTMetalPipelineOptions>(
+      "ttir-to-ttmetal-pipeline-debug",
+      "Pipeline lowering ttir to ttmetal - Debug",
+      tt::ttmetal::createTTIRToTTMetalPipelineDebug);
 }
 } // namespace mlir::tt::ttmetal
