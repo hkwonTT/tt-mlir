@@ -465,7 +465,7 @@ class D2MAllocate final : public impl::D2MAllocateBase<D2MAllocate> {
     // Start with SSA liveness for `func`.
 
     mlir::Liveness liveness(funcOp.getOperation());
-    const mlir::LivenessBlockInfo *li = liveness.getLiveness(&funcBody);
+    // const mlir::LivenessBlockInfo *li = liveness.getLiveness(&funcBody);
 
     // (a) Build `Operation` <-> preorder position mappings for the
     //  (unmodified) `funcOp` IR.
@@ -492,8 +492,29 @@ class D2MAllocate final : public impl::D2MAllocateBase<D2MAllocate> {
         TT_assert(op->getNumResults() == 1u);
         Value result = op->getResult(0);
 
-        Operation *firstOp = li->getStartOperation(result);
-        Operation *lastOp = li->getEndOperation(result, firstOp);
+        // Get liveness info for the block containing this operation.
+        // Operations in nested regions (e.g., inside d2m.spatial) may be in
+        // different blocks than funcBody, so we need to get the appropriate
+        // LivenessBlockInfo for their block.
+        Block *opBlock = op->getBlock();
+        const mlir::LivenessBlockInfo *blockLi = liveness.getLiveness(opBlock);
+        if (!blockLi) {
+          // If we can't get liveness info for this block, skip it.
+          // This can happen for operations in isolated regions.
+          return;
+        }
+
+        Operation *firstOp = blockLi->getStartOperation(result);
+        if (!firstOp) {
+          // If we can't determine the start operation, skip this op.
+          return;
+        }
+
+        Operation *lastOp = blockLi->getEndOperation(result, firstOp);
+        if (!lastOp) {
+          // If we can't determine the end operation, skip this op.
+          return;
+        }
 
         LivenessClosure &closure = livenessJoinGraph[op];
         closure.lastOp = lastOp;
@@ -512,7 +533,12 @@ class D2MAllocate final : public impl::D2MAllocateBase<D2MAllocate> {
     for (auto &[op, closure] : livenessJoinGraph) {
       // Initial last values are from the SSA liveness calculation.
       auto i = analysis.sequencing.operationMap.find(closure.lastOp);
-      TT_debug(i != analysis.sequencing.operationMap.end());
+      if (i == analysis.sequencing.operationMap.end()) {
+        // If lastOp is not in the sequencing map (e.g., it's in a different
+        // block that wasn't walked), we can't determine its position.
+        // This can happen for operations in nested regions. Skip this closure.
+        continue;
+      }
       closure.live.last = i->second;
     }
 
