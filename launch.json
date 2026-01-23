@@ -8,10 +8,10 @@
       "request": "launch",
       "program": "${workspaceFolder}/build/bin/ttmlir-opt",
       "args": [
-        "--ttir-to-ttmetal-pipeline=ttnn-mode=true",
-        "single_exp.mlir"
+        "--ttir-to-ttmetal-pipeline-debug=ttnn-mode=true",
+        "spatial_debug.mlir"
       ],
-      "cwd": "/localdev/hkwon/working/d2m_spatial$",
+      "cwd": "/localdev/hkwon/working/d2m_spatial",
       "stopAtEntry": false,
       "externalConsole": false,
 
