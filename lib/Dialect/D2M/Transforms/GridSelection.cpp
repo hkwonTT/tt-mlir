@@ -1283,6 +1283,50 @@ static void assignGrids(d2m::GenericOp genericOp,
   recreateGenericOp(genericOp, optimalOperandGrids);
 }
 
+// Update d2m.spatial result types to match spatial_yield return types.
+// This is needed when d2m.generic inside d2m.spatial has its types changed
+// by insertTTNNDRAMStreams, which causes spatial_yield to return different
+// types than the spatial op's results.
+static void updateSpatialOpSignature(d2m::SpatialOp spatialOp) {
+  // Collect return types from spatial_yield in each region
+  llvm::SmallVector<mlir::Type> newResultTypes;
+
+  for (Region &region : spatialOp->getRegions()) {
+    if (region.empty()) {
+      continue;
+    }
+
+    // Find spatial_yield in this region
+    d2m::SpatialYieldOp spatialYield = nullptr;
+    for (Operation &op : region.front()) {
+      if (auto yield = mlir::dyn_cast<d2m::SpatialYieldOp>(&op)) {
+        spatialYield = yield;
+        break;
+      }
+    }
+
+    if (!spatialYield) {
+      continue;
+    }
+
+    // Collect types from spatial_yield
+    for (Value value : spatialYield.getValues()) {
+      newResultTypes.push_back(value.getType());
+    }
+  }
+
+  // Check if update is needed
+  if (newResultTypes.size() != spatialOp->getNumResults()) {
+    return;
+  }
+
+  // Simply update results types to match spatial_yield return types
+  for (auto [result, newType] :
+       llvm::zip(spatialOp->getResults(), newResultTypes)) {
+    result.setType(newType);
+  }
+}
+
 // ----------------------------------------------------------------------------
 // Pass implementation
 // ----------------------------------------------------------------------------
@@ -1316,6 +1360,9 @@ public:
       }
       assignGrids(genericOp, targetGridShape, targetSquareGridShape);
     });
+
+    module.walk(
+        [&](d2m::SpatialOp spatialOp) { updateSpatialOpSignature(spatialOp); });
   }
 
 private:
