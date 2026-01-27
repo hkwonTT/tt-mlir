@@ -1183,22 +1183,6 @@ insertTTNNDRAMStreams(d2m::GenericOp genericOp,
     // already streamed, but the cast back to ttnn silently erases the index
     // map. Instead, we just forward the already streamed metal tensor to the
     // current generic.
-    llvm::errs() << "=== Current IR state at insertTTNNDRAMStreams ===\n";
-    if (auto moduleOp = genericOp->getParentOfType<mlir::ModuleOp>()) {
-      moduleOp->print(llvm::errs());
-    } else {
-      genericOp->print(llvm::errs());
-    }
-    llvm::errs() << "\n=== Current genericOp ===\n";
-    genericOp->print(llvm::errs());
-    llvm::errs() << "\n=== Operand (index " << operandIdx << ") ===\n";
-    if (auto *definingOp = operand.getDefiningOp()) {
-      definingOp->print(llvm::errs());
-      llvm::errs() << "\n";
-    } else {
-      llvm::errs() << "Operand is a block argument or has no defining op\n";
-    }
-    llvm::errs() << "\n=== End of IR dump ===\n";
 
     auto inputDefiningOp = operand.getDefiningOp<d2m::StreamLayoutOp>();
     if (inputDefiningOp) {
