@@ -1183,7 +1183,14 @@ insertTTNNDRAMStreams(d2m::GenericOp genericOp,
     // already streamed, but the cast back to ttnn silently erases the index
     // map. Instead, we just forward the already streamed metal tensor to the
     // current generic.
+
+    auto inputDefiningOp = operand.getDefiningOp<d2m::StreamLayoutOp>();
+    if (inputDefiningOp) {
+      continue;
+    }
+
     auto castOp = operand.getDefiningOp<ttir::TTNNMetalLayoutCastOp>();
+
     TT_assertv(
         castOp,
         "If one d2m.generic operand is from TTNN, they must all be from TTNN.");
