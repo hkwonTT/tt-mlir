@@ -224,6 +224,31 @@ public:
     return cbDescriptors;
   }
 
+  static ttnn::CoreRangeSetAttr createCoreRangeSet(
+      mlir::Builder &builder, llvm::ArrayRef<int64_t> gridSize,
+      std::optional<llvm::ArrayRef<int64_t>> startCoord = std::nullopt) {
+
+    llvm::SmallVector<int64_t, 4> defaultStart;
+    llvm::ArrayRef<int64_t> startCoordRef;
+
+    if (startCoord.has_value()) {
+      startCoordRef = *startCoord;
+    } else {
+      defaultStart.assign(gridSize.size(), 0);
+      startCoordRef = defaultStart;
+    }
+
+    return ttnn::CoreRangeSetAttr::get(
+        builder.getContext(),
+        ttnn::CoreRangeAttr::get(
+            builder.getContext(),
+            ttnn::CoreCoordAttr::get(builder.getContext(), startCoordRef[0],
+                                     startCoordRef[1]),
+            ttnn::CoreCoordAttr::get(builder.getContext(),
+                                     startCoordRef[0] + gridSize[0] - 1,
+                                     startCoordRef[1] + gridSize[1] - 1)));
+  }
+
   LogicalResult
   matchAndRewrite(d2m::GenericOp op, d2m::GenericOpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const final {
@@ -234,7 +259,7 @@ public:
     TT_assert(device);
 
     ttcore::GridAttr opGrid = op.getGrid();
-    llvm::SmallVector<int64_t> endCoreRange;
+    llvm::SmallVector<int64_t> gridSize;
     if (!opGrid.getMapping().isEmpty()) {
       // The genericOp has a virtual grid. We need to recover the original
       // physical grid.
@@ -248,17 +273,14 @@ public:
 
       auto physicalGridShape = d2m::utils::getPhysicalGridShape(output);
       // TTNN grids are (Width, Height), while D2M grids are (Height, Width).
-      endCoreRange = {physicalGridShape[1] - 1, physicalGridShape[0] - 1};
+      gridSize = {physicalGridShape[1], physicalGridShape[0]};
     } else {
       // TTNN grids are (Width, Height), while D2M grids are (Height, Width).
-      endCoreRange = {opGrid.getShape()[1] - 1, opGrid.getShape()[0] - 1};
+      gridSize = {opGrid.getShape()[1], opGrid.getShape()[0]};
     }
 
-    ttnn::CoreRangeSetAttr coreRangeSet = ttnn::CoreRangeSetAttr::get(
-        ctx,
-        ttnn::CoreRangeAttr::get(
-            ctx, ttnn::CoreCoordAttr::get(ctx, 0, 0),
-            ttnn::CoreCoordAttr::get(ctx, endCoreRange[0], endCoreRange[1])));
+    ttnn::CoreRangeSetAttr coreRangeSet =
+        createCoreRangeSet(rewriter, gridSize);
 
     llvm::SmallVector<Value> ios(size);
     llvm::SmallVector<Value> cbs(size);
