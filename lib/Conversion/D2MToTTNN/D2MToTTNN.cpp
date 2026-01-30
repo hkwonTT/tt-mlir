@@ -26,20 +26,30 @@ namespace mlir::tt {
 namespace {
 
 //===----------------------------------------------------------------------===//
-// Helpers for SpatialOp: remap kernel/CB buffer indices when merging regions.
-// Each region's GenericOp uses CB indices 0,1,...; after merge we assign
-// contiguous global indices, so kernel args and CB format buffer_index must
-// be updated.
+// Helpers for SpatialOp: remap kernel/CB buffer indices and tensor address
+// indices when merging regions. Each region's GenericOp uses local operand
+// indices (0,1,...) and CB indices (0,1,...); after merge we use global
+// allIos index and contiguous CB indices.
 //===----------------------------------------------------------------------===//
 
+// Remap kernel args: CB buffer index (add offset) and address-of-tensor
+// (local operand index -> global allIos index via localToGlobalTensorIndex).
 static SmallVector<mlir::Attribute>
-remapKernelArgsCBIndices(MLIRContext *ctx, ArrayRef<mlir::Attribute> args,
-                         size_t cbIndexOffset) {
+remapKernelArgsForSpatial(MLIRContext *ctx, ArrayRef<mlir::Attribute> args,
+                          size_t cbIndexOffset,
+                          ArrayRef<size_t> localToGlobalTensorIndex) {
   SmallVector<mlir::Attribute> remapped;
   for (mlir::Attribute arg : args) {
     if (auto cbArg = mlir::dyn_cast<ttnn::KernelArgCBBufferIndexAttr>(arg)) {
       size_t newIndex = cbArg.getBufferIndex() + cbIndexOffset;
       remapped.push_back(ttnn::KernelArgCBBufferIndexAttr::get(ctx, newIndex));
+    } else if (auto tensorArg =
+                   mlir::dyn_cast<ttnn::KernelArgAddressOfTensorAttr>(arg)) {
+      size_t localIndex = tensorArg.getTensorIndex();
+      TT_assert(localIndex < localToGlobalTensorIndex.size());
+      size_t globalIndex = localToGlobalTensorIndex[localIndex];
+      remapped.push_back(
+          ttnn::KernelArgAddressOfTensorAttr::get(ctx, globalIndex));
     } else {
       remapped.push_back(arg);
     }
@@ -47,18 +57,22 @@ remapKernelArgsCBIndices(MLIRContext *ctx, ArrayRef<mlir::Attribute> args,
   return remapped;
 }
 
-// Remap a kernel descriptor's CB buffer indices by adding cbIndexOffset.
+// Remap a kernel descriptor for SpatialOp: both CB indices and
+// #ttnn.kernel_arg_address_of_tensor (local operand index -> global allIos).
 static mlir::Attribute
-remapKernelDescriptorCBIndices(mlir::Attribute kernelAttr,
-                               size_t cbIndexOffset) {
+remapKernelDescriptorForSpatial(mlir::Attribute kernelAttr,
+                                size_t cbIndexOffset,
+                                ArrayRef<size_t> localToGlobalTensorIndex) {
   MLIRContext *ctx = kernelAttr.getContext();
 
   if (auto computeKernel =
           mlir::dyn_cast<ttnn::ComputeKernelAttr>(kernelAttr)) {
     auto ctArgs =
-        remapKernelArgsCBIndices(ctx, computeKernel.getCtArgs(), cbIndexOffset);
-    auto commonRtArgs = remapKernelArgsCBIndices(
-        ctx, computeKernel.getCommonRtArgs(), cbIndexOffset);
+        remapKernelArgsForSpatial(ctx, computeKernel.getCtArgs(), cbIndexOffset,
+                                  localToGlobalTensorIndex);
+    auto commonRtArgs =
+        remapKernelArgsForSpatial(ctx, computeKernel.getCommonRtArgs(),
+                                  cbIndexOffset, localToGlobalTensorIndex);
     return ttnn::ComputeKernelAttr::get(
         ctx, computeKernel.getSymbolRef(), computeKernel.getCoreRanges(),
         computeKernel.getMathFidelity(), computeKernel.getFp32DestAccEn(),
@@ -68,20 +82,22 @@ remapKernelDescriptorCBIndices(mlir::Attribute kernelAttr,
   }
 
   if (auto readKernel = mlir::dyn_cast<ttnn::ReadKernelAttr>(kernelAttr)) {
-    auto ctArgs =
-        remapKernelArgsCBIndices(ctx, readKernel.getCtArgs(), cbIndexOffset);
-    auto commonRtArgs = remapKernelArgsCBIndices(
-        ctx, readKernel.getCommonRtArgs(), cbIndexOffset);
+    auto ctArgs = remapKernelArgsForSpatial(
+        ctx, readKernel.getCtArgs(), cbIndexOffset, localToGlobalTensorIndex);
+    auto commonRtArgs =
+        remapKernelArgsForSpatial(ctx, readKernel.getCommonRtArgs(),
+                                  cbIndexOffset, localToGlobalTensorIndex);
     return ttnn::ReadKernelAttr::get(ctx, readKernel.getSymbolRef(),
                                      readKernel.getCoreRanges(), commonRtArgs,
                                      readKernel.getRtArgs(), ctArgs);
   }
 
   if (auto writeKernel = mlir::dyn_cast<ttnn::WriteKernelAttr>(kernelAttr)) {
-    auto ctArgs =
-        remapKernelArgsCBIndices(ctx, writeKernel.getCtArgs(), cbIndexOffset);
-    auto commonRtArgs = remapKernelArgsCBIndices(
-        ctx, writeKernel.getCommonRtArgs(), cbIndexOffset);
+    auto ctArgs = remapKernelArgsForSpatial(
+        ctx, writeKernel.getCtArgs(), cbIndexOffset, localToGlobalTensorIndex);
+    auto commonRtArgs =
+        remapKernelArgsForSpatial(ctx, writeKernel.getCommonRtArgs(),
+                                  cbIndexOffset, localToGlobalTensorIndex);
     return ttnn::WriteKernelAttr::get(ctx, writeKernel.getSymbolRef(),
                                       writeKernel.getCoreRanges(), commonRtArgs,
                                       writeKernel.getRtArgs(), ctArgs);
@@ -507,85 +523,100 @@ public:
 
     // Merge: one ttnn::GenericOp with [unique inputs, unique outputs] as I/O,
     // and concatenated kernels/CBs/semaphores per region with remapped CB
-    // indices.
+    // and tensor address indices.
     SymbolTable opSymTable(op->getParentOfType<ModuleOp>());
     SmallVector<mlir::Attribute> allKernelDescriptors;
     SmallVector<ttnn::KernelCBAttr> allCBDescriptors;
     SmallVector<ttnn::KernelSemaphoreAttr> allSemaphoreDescriptors;
 
-    // Collect unique inputs and outputs from all regions.
+    // Pass 1: Collect unique inputs and outputs, build Value -> global I/O
+    // index map (allIos = [allInputs, allOutputs]).
     llvm::DenseSet<Value> seenInputs;
     llvm::DenseSet<Value> seenOutputs;
     SmallVector<Value> allInputs;
     SmallVector<Value> allOutputs;
 
-    // Process each region.
-    size_t regionIndex = 0;
     for (Region &region : op->getRegions()) {
-      // Find the GenericOp in this region.
       auto genericOpIt = region.front().getOps<d2m::GenericOp>().begin();
       if (genericOpIt == region.front().getOps<d2m::GenericOp>().end()) {
         return rewriter.notifyMatchFailure(
             op, "Expected a GenericOp in each region of SpatialOp");
       }
       d2m::GenericOp genericOp = *genericOpIt;
+      llvm::SmallVector<Value> regionInputs;
+      llvm::SmallVector<Value> regionOutputs;
+      D2MGenericRewriter::extractInputsAndOutputsFromGenericOp(
+          genericOp, regionInputs, regionOutputs);
 
-      // Compute grid size for this region's GenericOp.
+      for (Value input : regionInputs) {
+        if (seenInputs.insert(input).second) {
+          allInputs.push_back(input);
+        }
+      }
+      for (Value output : regionOutputs) {
+        if (seenOutputs.insert(output).second) {
+          allOutputs.push_back(output);
+        }
+      }
+    }
+
+    llvm::DenseMap<Value, size_t> valueToIosIndex;
+    for (auto [i, v] : llvm::enumerate(allInputs)) {
+      valueToIosIndex[v] = i;
+    }
+    for (auto [i, v] : llvm::enumerate(allOutputs)) {
+      valueToIosIndex[v] = allInputs.size() + i;
+    }
+
+    // Pass 2: Create descriptors per region and remap kernel args (CB index +
+    // #ttnn.kernel_arg_address_of_tensor to global allIos index).
+    size_t regionIndex = 0;
+    for (Region &region : op->getRegions()) {
+      auto genericOpIt = region.front().getOps<d2m::GenericOp>().begin();
+      d2m::GenericOp genericOp = *genericOpIt;
+
+      // Local operand index (of this region's GenericOp) -> global allIos
+      // index.
+      llvm::SmallVector<size_t> localToGlobalTensorIndex;
+      for (Value input : genericOp.getInputs()) {
+        Value ioValue;
+        Value cbValue;
+        resolveOperandToIoAndCb(input, ioValue, cbValue);
+        auto it = valueToIosIndex.find(ioValue);
+        TT_assert(it != valueToIosIndex.end());
+        localToGlobalTensorIndex.push_back(it->second);
+      }
+      for (Value output : genericOp.getOutputs()) {
+        Value ioValue;
+        Value cbValue;
+        resolveOperandToIoAndCb(output, ioValue, cbValue);
+        auto it = valueToIosIndex.find(ioValue);
+        TT_assert(it != valueToIosIndex.end());
+        localToGlobalTensorIndex.push_back(it->second);
+      }
+
       llvm::SmallVector<int64_t> gridSize =
           D2MGenericRewriter::computeGridSizeFromGenericOp(genericOp);
-
-      // Get the start coordinate from the corresponding core range in
-      // grid_ranges.
       TT_assert(regionIndex < coreRanges.size());
       auto coreRange = coreRanges[regionIndex];
       auto startCoord = coreRange.getStartCoord();
       llvm::SmallVector<int64_t> startCoordVec = {startCoord.getX(),
                                                   startCoord.getY()};
 
-      // Create core range set for this region using its grid size and start
-      // coord.
       ttnn::CoreRangeSetAttr coreRangeSet =
           D2MGenericRewriter::createCoreRangeSet(rewriter, gridSize,
                                                  startCoordVec);
 
-      // Extract inputs and outputs for merged I/O list (CBs come from
-      // createDescriptorsFromGenericOp per region).
-      llvm::SmallVector<Value> regionInputs;
-      llvm::SmallVector<Value> regionOutputs;
-      D2MGenericRewriter::extractInputsAndOutputsFromGenericOp(
-          genericOp, regionInputs, regionOutputs);
-
-      // Collect unique inputs.
-      for (Value input : regionInputs) {
-        if (seenInputs.insert(input).second) {
-          allInputs.push_back(input);
-        }
-      }
-
-      // Collect unique outputs.
-      for (Value output : regionOutputs) {
-        if (seenOutputs.insert(output).second) {
-          allOutputs.push_back(output);
-        }
-      }
-
-      // Create all descriptors for this region's GenericOp.
-      // This includes CB descriptors with the region's own coreRangeSet.
       D2MGenericRewriter::GenericOpDescriptors regionDescriptors =
           D2MGenericRewriter::createDescriptorsFromGenericOp(
               rewriter, genericOp, device, coreRangeSet, opSymTable,
               this->mathFidelity);
 
-      // CB index offset for this region (indices before appending this region's
-      // CBs).
       size_t cbIndexOffset = allCBDescriptors.size();
 
-      // Remap this region's kernel descriptors so
-      // #ttnn.kernel_arg_cb_buffer_index refers to the merged CB list (offset
-      // by previous regions' CB count).
       for (mlir::Attribute kernelAttr : regionDescriptors.kernelDescriptors) {
-        allKernelDescriptors.push_back(
-            remapKernelDescriptorCBIndices(kernelAttr, cbIndexOffset));
+        allKernelDescriptors.push_back(remapKernelDescriptorForSpatial(
+            kernelAttr, cbIndexOffset, localToGlobalTensorIndex));
       }
 
       // Append this region's CB descriptors with remapped buffer_index so
