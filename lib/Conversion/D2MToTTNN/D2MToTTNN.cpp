@@ -25,87 +25,6 @@ namespace mlir::tt {
 
 namespace {
 
-//===----------------------------------------------------------------------===//
-// Helpers for SpatialOp: remap kernel/CB buffer indices and tensor address
-// indices when merging regions. Each region's GenericOp uses local operand
-// indices (0,1,...) and CB indices (0,1,...); after merge we use global
-// allIos index and contiguous CB indices.
-//===----------------------------------------------------------------------===//
-
-// Remap kernel args: CB buffer index (add offset) and address-of-tensor
-// (local operand index -> global allIos index via localToGlobalTensorIndex).
-static SmallVector<mlir::Attribute>
-remapKernelArgsForSpatial(MLIRContext *ctx, ArrayRef<mlir::Attribute> args,
-                          size_t cbIndexOffset,
-                          ArrayRef<size_t> localToGlobalTensorIndex) {
-  SmallVector<mlir::Attribute> remapped;
-  for (mlir::Attribute arg : args) {
-    if (auto cbArg = mlir::dyn_cast<ttnn::KernelArgCBBufferIndexAttr>(arg)) {
-      size_t newIndex = cbArg.getBufferIndex() + cbIndexOffset;
-      remapped.push_back(ttnn::KernelArgCBBufferIndexAttr::get(ctx, newIndex));
-    } else if (auto tensorArg =
-                   mlir::dyn_cast<ttnn::KernelArgAddressOfTensorAttr>(arg)) {
-      size_t localIndex = tensorArg.getTensorIndex();
-      TT_assert(localIndex < localToGlobalTensorIndex.size());
-      size_t globalIndex = localToGlobalTensorIndex[localIndex];
-      remapped.push_back(
-          ttnn::KernelArgAddressOfTensorAttr::get(ctx, globalIndex));
-    } else {
-      remapped.push_back(arg);
-    }
-  }
-  return remapped;
-}
-
-// Remap a kernel descriptor for SpatialOp: both CB indices and
-// #ttnn.kernel_arg_address_of_tensor (local operand index -> global allIos).
-static mlir::Attribute
-remapKernelDescriptorForSpatial(mlir::Attribute kernelAttr,
-                                size_t cbIndexOffset,
-                                ArrayRef<size_t> localToGlobalTensorIndex) {
-  MLIRContext *ctx = kernelAttr.getContext();
-
-  if (auto computeKernel =
-          mlir::dyn_cast<ttnn::ComputeKernelAttr>(kernelAttr)) {
-    auto ctArgs =
-        remapKernelArgsForSpatial(ctx, computeKernel.getCtArgs(), cbIndexOffset,
-                                  localToGlobalTensorIndex);
-    auto commonRtArgs =
-        remapKernelArgsForSpatial(ctx, computeKernel.getCommonRtArgs(),
-                                  cbIndexOffset, localToGlobalTensorIndex);
-    return ttnn::ComputeKernelAttr::get(
-        ctx, computeKernel.getSymbolRef(), computeKernel.getCoreRanges(),
-        computeKernel.getMathFidelity(), computeKernel.getFp32DestAccEn(),
-        computeKernel.getDstFullSyncEn(), computeKernel.getUnpackToDestModes(),
-        computeKernel.getBfp8PackPrecise(), computeKernel.getMathApproxMode(),
-        commonRtArgs, computeKernel.getRtArgs(), ctArgs);
-  }
-
-  if (auto readKernel = mlir::dyn_cast<ttnn::ReadKernelAttr>(kernelAttr)) {
-    auto ctArgs = remapKernelArgsForSpatial(
-        ctx, readKernel.getCtArgs(), cbIndexOffset, localToGlobalTensorIndex);
-    auto commonRtArgs =
-        remapKernelArgsForSpatial(ctx, readKernel.getCommonRtArgs(),
-                                  cbIndexOffset, localToGlobalTensorIndex);
-    return ttnn::ReadKernelAttr::get(ctx, readKernel.getSymbolRef(),
-                                     readKernel.getCoreRanges(), commonRtArgs,
-                                     readKernel.getRtArgs(), ctArgs);
-  }
-
-  if (auto writeKernel = mlir::dyn_cast<ttnn::WriteKernelAttr>(kernelAttr)) {
-    auto ctArgs = remapKernelArgsForSpatial(
-        ctx, writeKernel.getCtArgs(), cbIndexOffset, localToGlobalTensorIndex);
-    auto commonRtArgs =
-        remapKernelArgsForSpatial(ctx, writeKernel.getCommonRtArgs(),
-                                  cbIndexOffset, localToGlobalTensorIndex);
-    return ttnn::WriteKernelAttr::get(ctx, writeKernel.getSymbolRef(),
-                                      writeKernel.getCoreRanges(), commonRtArgs,
-                                      writeKernel.getRtArgs(), ctArgs);
-  }
-
-  return kernelAttr;
-}
-
 // Resolve a GenericOp operand (stream_layout or cast) to the TTNN io value and
 // the CB storage value. Used by both GenericOp and SpatialOp operand
 // extraction.
@@ -675,6 +594,83 @@ public:
   };
 
 private:
+  // Remap kernel args when merging regions: CB buffer index (add offset) and
+  // address-of-tensor (local operand index -> global allIos).
+  static SmallVector<mlir::Attribute>
+  remapKernelArgsForSpatial(MLIRContext *ctx, ArrayRef<mlir::Attribute> args,
+                            size_t cbIndexOffset,
+                            ArrayRef<size_t> localToGlobalTensorIndex) {
+    SmallVector<mlir::Attribute> remapped;
+    for (mlir::Attribute arg : args) {
+      if (auto cbArg = mlir::dyn_cast<ttnn::KernelArgCBBufferIndexAttr>(arg)) {
+        size_t newIndex = cbArg.getBufferIndex() + cbIndexOffset;
+        remapped.push_back(
+            ttnn::KernelArgCBBufferIndexAttr::get(ctx, newIndex));
+      } else if (auto tensorArg =
+                     mlir::dyn_cast<ttnn::KernelArgAddressOfTensorAttr>(arg)) {
+        size_t localIndex = tensorArg.getTensorIndex();
+        TT_assert(localIndex < localToGlobalTensorIndex.size());
+        size_t globalIndex = localToGlobalTensorIndex[localIndex];
+        remapped.push_back(
+            ttnn::KernelArgAddressOfTensorAttr::get(ctx, globalIndex));
+      } else {
+        remapped.push_back(arg);
+      }
+    }
+    return remapped;
+  }
+
+  // Remap a kernel descriptor for SpatialOp: CB indices and
+  // #ttnn.kernel_arg_address_of_tensor (local -> global allIos index).
+  static mlir::Attribute
+  remapKernelDescriptorForSpatial(mlir::Attribute kernelAttr,
+                                  size_t cbIndexOffset,
+                                  ArrayRef<size_t> localToGlobalTensorIndex) {
+    MLIRContext *ctx = kernelAttr.getContext();
+
+    if (auto computeKernel =
+            mlir::dyn_cast<ttnn::ComputeKernelAttr>(kernelAttr)) {
+      auto ctArgs =
+          remapKernelArgsForSpatial(ctx, computeKernel.getCtArgs(),
+                                    cbIndexOffset, localToGlobalTensorIndex);
+      auto commonRtArgs =
+          remapKernelArgsForSpatial(ctx, computeKernel.getCommonRtArgs(),
+                                    cbIndexOffset, localToGlobalTensorIndex);
+      return ttnn::ComputeKernelAttr::get(
+          ctx, computeKernel.getSymbolRef(), computeKernel.getCoreRanges(),
+          computeKernel.getMathFidelity(), computeKernel.getFp32DestAccEn(),
+          computeKernel.getDstFullSyncEn(),
+          computeKernel.getUnpackToDestModes(),
+          computeKernel.getBfp8PackPrecise(), computeKernel.getMathApproxMode(),
+          commonRtArgs, computeKernel.getRtArgs(), ctArgs);
+    }
+
+    if (auto readKernel = mlir::dyn_cast<ttnn::ReadKernelAttr>(kernelAttr)) {
+      auto ctArgs = remapKernelArgsForSpatial(
+          ctx, readKernel.getCtArgs(), cbIndexOffset, localToGlobalTensorIndex);
+      auto commonRtArgs =
+          remapKernelArgsForSpatial(ctx, readKernel.getCommonRtArgs(),
+                                    cbIndexOffset, localToGlobalTensorIndex);
+      return ttnn::ReadKernelAttr::get(ctx, readKernel.getSymbolRef(),
+                                       readKernel.getCoreRanges(), commonRtArgs,
+                                       readKernel.getRtArgs(), ctArgs);
+    }
+
+    if (auto writeKernel = mlir::dyn_cast<ttnn::WriteKernelAttr>(kernelAttr)) {
+      auto ctArgs =
+          remapKernelArgsForSpatial(ctx, writeKernel.getCtArgs(), cbIndexOffset,
+                                    localToGlobalTensorIndex);
+      auto commonRtArgs =
+          remapKernelArgsForSpatial(ctx, writeKernel.getCommonRtArgs(),
+                                    cbIndexOffset, localToGlobalTensorIndex);
+      return ttnn::WriteKernelAttr::get(
+          ctx, writeKernel.getSymbolRef(), writeKernel.getCoreRanges(),
+          commonRtArgs, writeKernel.getRtArgs(), ctArgs);
+    }
+
+    return kernelAttr;
+  }
+
   ttmetal::MathFidelity mathFidelity;
 };
 } // namespace
