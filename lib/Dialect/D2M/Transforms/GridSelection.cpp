@@ -1167,10 +1167,30 @@ insertTTNNDRAMStreams(d2m::GenericOp genericOp,
     TT_assertv(
         castOp,
         "If one d2m.generic operand is from TTNN, they must all be from TTNN.");
+    // Replace all uses of oldVal with newVal that belong to this generic
+    // (this op's operand at operandIdx and any use inside this op's regions).
+    auto replaceUsesInThisGeneric = [&](Value oldVal, Value newVal,
+                                        unsigned opIdx) {
+      for (OpOperand &use : llvm::make_early_inc_range(oldVal.getUses())) {
+        Operation *owner = use.getOwner();
+        if (owner == genericOp.getOperation()) {
+          if (use.getOperandNumber() == opIdx) {
+            use.set(newVal);
+          }
+          continue;
+        }
+        for (Region &region : genericOp->getRegions()) {
+          if (region.isAncestor(owner->getParentRegion())) {
+            use.set(newVal);
+            break;
+          }
+        }
+      }
+    };
     auto producerCastOp =
         castOp.getInput().getDefiningOp<ttir::TTNNMetalLayoutCastOp>();
     if (producerCastOp) {
-      genericOp->setOperand(operandIdx, producerCastOp.getInput());
+      replaceUsesInThisGeneric(operand, producerCastOp.getInput(), operandIdx);
       continue;
     }
 
@@ -1213,7 +1233,7 @@ insertTTNNDRAMStreams(d2m::GenericOp genericOp,
         builder.create<d2m::EmptyOp>(castOp.getLoc(), storageTensor);
     auto streamOp = builder.create<d2m::StreamLayoutOp>(
         castOp.getLoc(), streamOutputTensor, castOp.getResult(), storageOp);
-    genericOp->setOperand(operandIdx, streamOp.getResult());
+    replaceUsesInThisGeneric(operand, streamOp.getResult(), operandIdx);
   }
 
   TT_assertv(llvm::all_of(optimalOperandGrids,
