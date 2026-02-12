@@ -1626,9 +1626,12 @@ public:
 
     mlir::AffineMap map = mapAttr.getValue();
 
-    // The existing grid mapping includes a leading device index result, so we
-    // select (dim + 1).
-    const unsigned resultIdx = static_cast<unsigned>(op.getDim() + 1);
+    // Grid mapping from GenericOp has a leading device index result (3 results:
+    // device, virtY, virtX), so we select result (dim + 1). Physical-to-virtual
+    // map from SpatialOp has 2 results (virtY, virtX), so we select result dim.
+    const unsigned resultIdx = (map.getNumResults() == 2)
+                                   ? static_cast<unsigned>(op.getDim())
+                                   : static_cast<unsigned>(op.getDim() + 1);
     TT_assertv(resultIdx < map.getNumResults(),
                "Expected result index to be less than the number of results, "
                "failing.");

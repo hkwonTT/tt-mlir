@@ -4,6 +4,9 @@
 
 #include "ttmlir/Dialect/D2M/Transforms/Passes.h"
 
+#include "ttmlir/Dialect/D2M/IR/D2MOps.h"
+#include "ttmlir/Dialect/TTCore/IR/TTCoreOpsTypes.h"
+
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/AffineExpr.h"
@@ -49,6 +52,57 @@ public:
         });
   }
 
+  // If \p generic is inside a d2m.spatial, build phys_to_virt map from the
+  // region's core range start so that physical core (sx,sy) maps to virtual
+  // (0,0). Returns empty map when not in SpatialOp or start is (0,0). Uses
+  // context's empty map to avoid uninitialized AffineMap.
+  static AffineMap getPhysToVirtMapForSpatial(GenericOp generic) {
+    MLIRContext *ctx = generic.getContext();
+    auto emptyMap = AffineMap::get(ctx);
+
+    auto *op = generic.getOperation();
+    Operation *parent = op->getParentOp();
+    d2m::SpatialOp spatialOp = nullptr;
+    while (parent) {
+      if (auto spatial = llvm::dyn_cast<d2m::SpatialOp>(parent)) {
+        spatialOp = spatial;
+        break;
+      }
+      parent = parent->getParentOp();
+    }
+    if (!spatialOp) {
+      return emptyMap;
+    }
+
+    Region *genericRegion = op->getParentRegion();
+    std::optional<unsigned> regionIndex;
+    for (auto [idx, region] : llvm::enumerate(spatialOp.getRegions())) {
+      if (genericRegion == &region) {
+        regionIndex = idx;
+        break;
+      }
+    }
+    if (!regionIndex ||
+        *regionIndex >= spatialOp.getGridRanges().getCoreRanges().size()) {
+      return emptyMap;
+    }
+
+    ttcore::CoreRangeAttr coreRange =
+        spatialOp.getGridRanges().getCoreRanges()[*regionIndex];
+    int64_t startY = coreRange.getStartCoord().getY();
+    int64_t startX = coreRange.getStartCoord().getX();
+    if (startY == 0 && startX == 0) {
+      return emptyMap;
+    }
+
+    // Map (d0, d1) -> (d0 - startY, d1 - startX): physical -> virtual.
+    AffineExpr d0 = getAffineDimExpr(0, ctx);
+    AffineExpr d1 = getAffineDimExpr(1, ctx);
+    AffineExpr cY = getAffineConstantExpr(startY, ctx);
+    AffineExpr cX = getAffineConstantExpr(startX, ctx);
+    return AffineMap::get(2, 0, {d0 - cY, d1 - cX}, ctx);
+  }
+
   static void replaceIndexOpUses(PatternRewriter &rewriter, Location loc,
                                  scf::LoopNest &loopNest, GenericOp generic) {
     // Get the output operand indexing map to determine which dimensions
@@ -59,19 +113,32 @@ public:
             generic.getIndexingMaps()[outputOperandsIndex])
             .getValue();
 
-    // Get the grid mapping for use with CoreIndexOp. The mapping includes
-    // a leading device index result, so we use the full mapping and let
-    // CoreIndexOp handle dimension selection via (dim + 1).
+    // Get the grid mapping for use with CoreIndexOp. When this generic is
+    // inside a d2m.spatial with a non-zero core range start, use a
+    // physical-to-virtual map so core_index returns virtual indices.
+    // Otherwise use the generic's grid mapping only when non-empty. Use a
+    // flag to avoid touching an uninitialized AffineMap.
     AffineMap gridMapping = generic.getGrid().getMapping();
+    AffineMap physToVirtMap = getPhysToVirtMapForSpatial(generic);
+    bool usePhysToVirtMap = false;
+    bool useGridMapping = false;
+    if (!physToVirtMap.isEmpty()) {
+      usePhysToVirtMap = true;
+    } else if (!gridMapping.isEmpty()) {
+      useGridMapping = true;
+    }
 
     SmallVector<int64_t> blockFactors = generic.getBlockFactorsValue();
 
     // The number of grid dimensions (typically 2 for a 2D grid, but could be
-    // more with virtualization)
+    // more with virtualization). For spatial phys-to-virt map we have 2 dims.
     constexpr unsigned numPhysicalGridDims = 2;
-    unsigned numGridDims = gridMapping.isEmpty()
-                               ? numPhysicalGridDims
-                               : gridMapping.getNumResults() - 1;
+    unsigned numGridDims = numPhysicalGridDims;
+    if (usePhysToVirtMap) {
+      numGridDims = physToVirtMap.getNumResults();
+    } else if (useGridMapping) {
+      numGridDims = gridMapping.getNumResults() - 1; // leading device result
+    }
 
     // Create CoreIndexOp operations lazily - create them the first time we need
     // them, at the start of the outermost loop body, then reuse them.
@@ -90,15 +157,24 @@ public:
       rewriter.setInsertionPoint(index);
 
       // Create CoreIndexOp operations lazily at the start of the outermost loop
-      // body if we haven't created them yet. Use CoreIndexOp with the grid
-      // mapping directly - the lowering will handle applying the affine map.
+      // body if we haven't created them yet. Use phys_to_virt map when present
+      // (e.g. from d2m.spatial grid_ranges); otherwise use generic's grid
+      // mapping. The lowering will apply the affine map.
       if (!virtualGridIndicesCreated && !loopNest.loops.empty()) {
         // Set insertion point to the start of the outermost loop body
         rewriter.setInsertionPointToStart(loopNest.loops.front().getBody());
         virtualGridIndices.resize(numGridDims);
         for (unsigned gridDim = 0; gridDim < numGridDims; gridDim++) {
-          virtualGridIndices[gridDim] = rewriter.create<CoreIndexOp>(
-              loc, static_cast<int64_t>(gridDim), gridMapping);
+          if (usePhysToVirtMap) {
+            virtualGridIndices[gridDim] = rewriter.create<CoreIndexOp>(
+                loc, static_cast<int64_t>(gridDim), physToVirtMap);
+          } else if (useGridMapping) {
+            virtualGridIndices[gridDim] = rewriter.create<CoreIndexOp>(
+                loc, static_cast<int64_t>(gridDim), gridMapping);
+          } else {
+            virtualGridIndices[gridDim] = rewriter.create<CoreIndexOp>(
+                loc, static_cast<int64_t>(gridDim));
+          }
         }
         virtualGridIndicesCreated = true;
         // Reset insertion point back to before the BlockIndexOp
