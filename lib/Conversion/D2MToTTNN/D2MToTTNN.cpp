@@ -829,6 +829,12 @@ static LogicalResult convertGenerics(ModuleOp module,
 // Spatial op conversion: merge region ttnn.generics into one (index remap only)
 // ===----------------------------------------------------------------------===//
 
+// When true (default production): CB and semaphore indices from each region are
+// offset so the merged program uses a single non-overlapping index space.
+// When false (temporary experiment): keep each region's local CB/semaphore
+// indices; merged descriptor lists may report duplicate indices.
+static constexpr bool kSpatialMergeOffsetCbSemAcrossRegions = false;
+
 static ttnn::CoreRangeSetAttr
 ttCoreRangeToTtnnCoreRangeSet(MLIRContext *ctx, ttcore::CoreRangeAttr cr) {
   auto sc = cr.getStartCoord();
@@ -1122,12 +1128,14 @@ convertSingleSpatial(d2m::SpatialOp spatialOp, IRRewriter &rewriter,
     }
 
     for (const auto [i, _] : llvm::enumerate(program.getCbs())) {
-      mappings.cbMap[{g, i}] = cbOffset + i;
+      mappings.cbMap[{g, i}] =
+          kSpatialMergeOffsetCbSemAcrossRegions ? (cbOffset + i) : i;
     }
     cbOffset += program.getCbs().size();
 
     for (const auto [i, _] : llvm::enumerate(program.getSemaphores())) {
-      mappings.semMap[{g, i}] = semOffset + i;
+      mappings.semMap[{g, i}] =
+          kSpatialMergeOffsetCbSemAcrossRegions ? (semOffset + i) : i;
     }
     semOffset += program.getSemaphores().size();
 
@@ -1162,8 +1170,10 @@ convertSingleSpatial(d2m::SpatialOp spatialOp, IRRewriter &rewriter,
       auto semIt = mappings.semMap.find({g, static_cast<unsigned>(i)});
       TT_assertv(semIt != mappings.semMap.end(),
                  "spatial merge: missing semMap for semaphore descriptor");
+      unsigned semId =
+          kSpatialMergeOffsetCbSemAcrossRegions ? semIt->second : sem.getId();
       mergedSemaphores.push_back(
-          remapSemaphoreDescriptor(ctx, sem, coreOv, semIt->second));
+          remapSemaphoreDescriptor(ctx, sem, coreOv, semId));
     }
   }
 
