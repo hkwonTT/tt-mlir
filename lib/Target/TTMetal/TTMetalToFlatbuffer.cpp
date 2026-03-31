@@ -31,11 +31,13 @@
 #include "flatbuffers/buffer.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/IR/AffineMap.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/LogicalResult.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/STLForwardCompat.h"
 #include "llvm/ADT/SmallVector.h"
@@ -143,14 +145,25 @@ static target::Dim2dRange toFlatbuffer(CoreRangeAttr coreRange) {
                             target::Dim2d(size[0], size[1]));
 }
 
-static std::array<int32_t, 2> calculateCoreRangeSetShapeExtents(
-    const std::vector<target::Dim2dRange> &coreRangeSet) {
-  std::array<int32_t, 2> extents = {0, 0};
-  for (const auto &range : coreRangeSet) {
-    extents[0] = std::max(extents[0], range.loc().y() + range.size().y());
-    extents[1] = std::max(extents[1], range.loc().x() + range.size().x());
+// Logical shard counts along Y/X for ShardedBufferConfig sizing (tensor pages,
+// total bytes). Must follow memref shard grid, not the physical core_range bbox
+// (offset cores e.g. (1,1) would inflate loc+size to 2x2 and break mesh buffer
+// size vs BufferDesc host_volume).
+static std::array<int32_t, 2> logicalShardGridExtentsFromMemrefGridShape(
+    llvm::ArrayRef<int64_t> memrefGridShape) {
+  if (memrefGridShape.empty()) {
+    return {1, 1};
   }
-  return extents;
+  if (memrefGridShape.size() == 1) {
+    return {static_cast<int32_t>(memrefGridShape[0]), 1};
+  }
+  int64_t y = 1;
+  for (size_t i = 0; i + 2 < memrefGridShape.size(); ++i) {
+    y *= memrefGridShape[i];
+  }
+  y *= memrefGridShape[memrefGridShape.size() - 2];
+  int64_t x = memrefGridShape.back();
+  return {static_cast<int32_t>(y), static_cast<int32_t>(x)};
 }
 
 static bool isMemrefDeviceDRAMMemspace(MemRefType memref) {
@@ -194,6 +207,45 @@ static AffineMap extendMappingForHigherDimGrid(AffineMap originalMapping,
   // Create new map with higher dimensional input.
   return AffineMap::get(gridRank, originalMapping.getNumSymbols(), results,
                         ctx);
+}
+
+// Composes optional D2M `virtualGridForwardMapping` (shard indices -> worker
+// virtual Y/X in its first two results) with the device virt_to_physical map,
+// producing the affine map used for shard_spec core_range_set sampling.
+static AffineMap buildShardGridToPhysCoreMap(MLIRContext *ctx,
+                                             AffineMap deviceVirtToPhysical,
+                                             unsigned gridRank,
+                                             AffineMap forwardVgm) {
+  assert(forwardVgm.getNumSymbols() == 0 &&
+         "forward VGM with symbols is unsupported for TTMetal shard placement");
+  assert(gridRank <= forwardVgm.getNumDims() &&
+         "shard grid rank exceeds forward VGM input rank");
+  assert(forwardVgm.getNumResults() >= 2 &&
+         "forward VGM must have at least two results (worker Y, X)");
+  assert(deviceVirtToPhysical.getNumDims() == 2 &&
+         "device virt_to_physical must be 2D");
+  assert(deviceVirtToPhysical.getNumResults() ==
+             static_cast<int64_t>(ttcore::PhysGridResultIdx::NumIndices) &&
+         "device virt_to_physical must map to (device, y, x)");
+
+  SmallVector<AffineExpr> padExprs;
+  padExprs.reserve(forwardVgm.getNumDims());
+  for (unsigned i = 0; i < forwardVgm.getNumDims(); ++i) {
+    if (i < gridRank) {
+      padExprs.push_back(getAffineDimExpr(i, ctx));
+    } else {
+      padExprs.push_back(getAffineConstantExpr(0, ctx));
+    }
+  }
+  AffineMap padMap = AffineMap::get(gridRank, 0, padExprs, ctx);
+  AffineMap afterForward = forwardVgm.compose(padMap);
+
+  SmallVector<AffineExpr> workerVirtExprs = {afterForward.getResult(0),
+                                             afterForward.getResult(1)};
+  AffineMap shardToWorkerVirt =
+      AffineMap::get(gridRank, 0, workerVirtExprs, ctx);
+
+  return deviceVirtToPhysical.compose(shardToWorkerVirt);
 }
 
 static flatbuffers::Offset<target::metal::ShardedBufferConfig>
@@ -270,7 +322,8 @@ static flatbuffers::Offset<target::metal::ShardedBufferConfig>
 createShardedBufferConfigForL1Memref(
     FlatbufferObjectCache &cache, MemRefType memref, ttcore::DeviceAttr device,
     target::Dim2d elementShape,
-    std::optional<AffineMap> virtualGridInverseMapping) {
+    std::optional<AffineMap> virtualGridInverseMapping,
+    std::optional<AffineMap> virtualGridForwardMapping) {
   auto deviceLayout = mlir::dyn_cast_if_present<ttcore::DeviceLayoutInterface>(
       memref.getLayout());
   if (!deviceLayout) {
@@ -287,13 +340,21 @@ createShardedBufferConfigForL1Memref(
       shardLayout, device, memref, virtualGridInverseMapping);
 
   auto memrefShardShape = shardLayout.getShardShape(memref);
-  auto extendedMapping = extendMappingForHigherDimGrid(
-      device.getWorkerGrid().getVirtToPhysicalMap(), memrefGridShape.size());
+  AffineMap gridToPhysCore;
+  if (virtualGridForwardMapping) {
+    gridToPhysCore = buildShardGridToPhysCoreMap(
+        memref.getContext(), device.getWorkerGrid().getVirtToPhysicalMap(),
+        static_cast<unsigned>(memrefGridShape.size()),
+        *virtualGridForwardMapping);
+  } else {
+    gridToPhysCore = extendMappingForHigherDimGrid(
+        device.getWorkerGrid().getVirtToPhysicalMap(), memrefGridShape.size());
+  }
 
   std::vector<target::Dim2dRange> coreRangeSet =
-      toFlatbuffer(cache, memrefGridShape, extendedMapping);
+      toFlatbuffer(cache, memrefGridShape, gridToPhysCore);
   std::array<int32_t, 2> gridShapeExtents =
-      calculateCoreRangeSetShapeExtents(coreRangeSet);
+      logicalShardGridExtentsFromMemrefGridShape(memrefGridShape);
 
   // Calculate ShardSpec.
   assert(stride[stride.size() - 1] % elementSize == 0);
@@ -338,7 +399,8 @@ static flatbuffers::Offset<target::metal::ShardedBufferConfig>
 memrefTypeToShardedBufferConfigFlatbuffer(
     FlatbufferObjectCache &cache, MemRefType memref, ttcore::DeviceAttr device,
     target::Dim2d elementShape, ttcore::SystemDescAttr systemDesc,
-    std::optional<AffineMap> virtualGridInverseMapping) {
+    std::optional<AffineMap> virtualGridInverseMapping,
+    std::optional<AffineMap> virtualGridForwardMapping) {
 
   flatbuffers::Offset<target::metal::ShardedBufferConfig> sharded_buffer_config;
   if (isMemrefDeviceDRAMMemspace(memref)) {
@@ -346,7 +408,8 @@ memrefTypeToShardedBufferConfigFlatbuffer(
         cache, memref, device, systemDesc);
   } else if (isMemrefDeviceL1Memspace(memref)) {
     sharded_buffer_config = createShardedBufferConfigForL1Memref(
-        cache, memref, device, elementShape, virtualGridInverseMapping);
+        cache, memref, device, elementShape, virtualGridInverseMapping,
+        virtualGridForwardMapping);
   } else {
     assert(false &&
            "ShardedBufferConfig not supported for System memory space");
@@ -401,7 +464,8 @@ memrefTypeToInterleavedBufferConfigFlatbuffer(FlatbufferObjectCache &cache,
 static flatbuffers::Offset<target::metal::CircularBufferConfig>
 memrefTypeToCircularBufferConfigFlatbuffer(
     FlatbufferObjectCache &cache, MemRefType memref, ttcore::DeviceAttr device,
-    std::optional<AffineMap> virtualGridInverseMapping) {
+    std::optional<AffineMap> virtualGridInverseMapping,
+    std::optional<AffineMap> virtualGridForwardMapping) {
   auto deviceLayout = mlir::dyn_cast_if_present<ttcore::DeviceLayoutInterface>(
       memref.getLayout());
   if (!deviceLayout) {
@@ -415,22 +479,34 @@ memrefTypeToCircularBufferConfigFlatbuffer(
   SmallVector<int64_t> memrefGridShape = getPhysicalGridShapeForVirtualGrid(
       shardLayout, device, memref, virtualGridInverseMapping);
 
-  auto extendedMapping = extendMappingForHigherDimGrid(
-      device.getWorkerGrid().getVirtToPhysicalMap(), memrefGridShape.size());
+  std::vector<target::Dim2dRange> coreRangeSet;
+  if (virtualGridForwardMapping) {
+    // Match sharded buffer shard_spec: place CBs on the physical cores given by
+    // forward VGM composed with device virt_to_physical (e.g. spatial 1x1 at
+    // offset (1,1)).
+    AffineMap gridToPhysCore = buildShardGridToPhysCoreMap(
+        memref.getContext(), device.getWorkerGrid().getVirtToPhysicalMap(),
+        static_cast<unsigned>(memrefGridShape.size()),
+        *virtualGridForwardMapping);
+    coreRangeSet = toFlatbuffer(cache, memrefGridShape, gridToPhysCore);
+  } else {
+    auto extendedMapping = extendMappingForHigherDimGrid(
+        device.getWorkerGrid().getVirtToPhysicalMap(), memrefGridShape.size());
 
-  // We default to the worker grid shape since memrefGridShape may be larger
-  // than the available grid due to block factors. Directly using the
-  // memrefGridShape will lead to crashes when initializing CBs, therefore we
-  // spoof the shape here.
-  SmallVector<int64_t> workerGridShape =
-      llvm::to_vector(device.getWorkerGrid().getShape());
-  if (workerGridShape.size() < memrefGridShape.size()) {
-    workerGridShape.insert(workerGridShape.begin(),
-                           memrefGridShape.size() - workerGridShape.size(), 1);
+    // We default to the worker grid shape since memrefGridShape may be larger
+    // than the available grid due to block factors. Directly using the
+    // memrefGridShape will lead to crashes when initializing CBs, therefore we
+    // spoof the shape here.
+    SmallVector<int64_t> workerGridShape =
+        llvm::to_vector(device.getWorkerGrid().getShape());
+    if (workerGridShape.size() < memrefGridShape.size()) {
+      workerGridShape.insert(workerGridShape.begin(),
+                             memrefGridShape.size() - workerGridShape.size(),
+                             1);
+    }
+
+    coreRangeSet = toFlatbuffer(cache, workerGridShape, extendedMapping);
   }
-
-  std::vector<target::Dim2dRange> coreRangeSet =
-      toFlatbuffer(cache, workerGridShape, extendedMapping);
 
   uint64_t pageSize = device.getMemrefCBPageSizeBytes(memref);
   uint64_t shardSize =
@@ -445,7 +521,8 @@ static flatbuffers::Offset<target::metal::BufferDesc>
 memrefTypeToFlatbuffer(FlatbufferObjectCache &cache, MemRefType memref,
                        ttcore::DeviceAttr device,
                        ttcore::SystemDescAttr systemDesc,
-                       std::optional<AffineMap> virtualGridInverseMapping) {
+                       std::optional<AffineMap> virtualGridInverseMapping,
+                       std::optional<AffineMap> virtualGridForwardMapping) {
   std::vector<int32_t> shape =
       ttmlir::utils::castContainer<std::vector<int32_t>>(memref.getShape());
   target::Dim2d elementShape(1, 1);
@@ -473,14 +550,15 @@ memrefTypeToFlatbuffer(FlatbufferObjectCache &cache, MemRefType memref,
       flatbuffers::Offset<target::metal::ShardedBufferConfig>
           shardedBufferConfig = memrefTypeToShardedBufferConfigFlatbuffer(
               cache, memref, device, elementShape, systemDesc,
-              virtualGridInverseMapping);
+              virtualGridInverseMapping, virtualGridForwardMapping);
 
       // only generate CircularBufferConfig for L1 memspace
       flatbuffers::Offset<target::metal::CircularBufferConfig>
           circularBufferConfig =
               isMemrefDeviceL1Memspace(memref)
                   ? memrefTypeToCircularBufferConfigFlatbuffer(
-                        cache, memref, device, virtualGridInverseMapping)
+                        cache, memref, device, virtualGridInverseMapping,
+                        virtualGridForwardMapping)
                   : 0;
 
       bufferDetail = target::metal::CreateMetalBuffer(
@@ -536,19 +614,15 @@ memrefTypeToFlatbuffer(FlatbufferObjectCache &cache, MemRefType memref,
       (meshName ? meshName.str().data() : nullptr));
 }
 
-static flatbuffers::Offset<target::metal::BufferRef>
-bufferValueToFlatbuffer(FlatbufferObjectCache &cache, Value value,
-                        ttcore::SystemDescAttr systemDesc, uint64_t address) {
-  auto device = ttcore::lookupDevice(value.getParentBlock()->getParentOp());
-  assert(device);
+static flatbuffers::Offset<target::metal::BufferDesc>
+bufferDescValueToFlatbuffer(
+    FlatbufferObjectCache &cache, Value value, ttcore::DeviceAttr device,
+    ttcore::SystemDescAttr systemDesc,
+    std::optional<AffineMap> virtualGridInverseMapping,
+    std::optional<AffineMap> virtualGridForwardMapping) {
   auto memrefType = mlir::cast<MemRefType>(value.getType());
 
-  std::optional<AffineMap> virtualGridInverseMapping;
   if (auto createBufferOp = value.getDefiningOp<ttmetal::CreateBufferOp>()) {
-    if (auto mapAttr = createBufferOp.getVirtualGridInverseMappingAttr()) {
-      virtualGridInverseMapping = mapAttr.getValue();
-    }
-
     // Hoisted CB buffers carry CBLayoutAttr (per-core local shape).
     // Reconstruct a full [1x1 grid + shard] + ShardLayoutAttr memref type
     // so we fall through to the existing memrefTypeToFlatbuffer path.
@@ -566,9 +640,40 @@ bufferValueToFlatbuffer(FlatbufferObjectCache &cache, Value value,
     }
   }
 
-  auto bufferDesc =
-      cache.getOrCreate(memrefType, memrefTypeToFlatbuffer, device, systemDesc,
-                        virtualGridInverseMapping);
+  return memrefTypeToFlatbuffer(cache, memrefType, device, systemDesc,
+                                virtualGridInverseMapping,
+                                virtualGridForwardMapping);
+}
+
+static flatbuffers::Offset<target::metal::BufferRef> bufferValueToFlatbuffer(
+    FlatbufferObjectCache &cache, Value value,
+    ttcore::SystemDescAttr systemDesc, uint64_t address,
+    llvm::DenseMap<const void *, flatbuffers::Offset<target::metal::BufferDesc>>
+        *bufferDescCache) {
+  auto device = ttcore::lookupDevice(value.getParentBlock()->getParentOp());
+  assert(device);
+
+  std::optional<AffineMap> virtualGridInverseMapping;
+  std::optional<AffineMap> virtualGridForwardMapping;
+  if (auto createBufferOp = value.getDefiningOp<ttmetal::CreateBufferOp>()) {
+    if (auto mapAttr = createBufferOp.getVirtualGridInverseMappingAttr()) {
+      virtualGridInverseMapping = mapAttr.getValue();
+    }
+    if (auto fwdAttr = createBufferOp.getVirtualGridForwardMappingAttr()) {
+      virtualGridForwardMapping = fwdAttr.getValue();
+    }
+  }
+
+  flatbuffers::Offset<target::metal::BufferDesc> bufferDesc;
+  if (auto it = bufferDescCache->find(value.getAsOpaquePointer());
+      it != bufferDescCache->end()) {
+    bufferDesc = it->second;
+  } else {
+    bufferDesc = bufferDescValueToFlatbuffer(cache, value, device, systemDesc,
+                                             virtualGridInverseMapping,
+                                             virtualGridForwardMapping);
+    bufferDescCache->insert({value.getAsOpaquePointer(), bufferDesc});
+  }
   return target::metal::CreateBufferRef(*cache.fbb, cache.nextGlobalId(),
                                         address, bufferDesc);
 }
@@ -792,6 +897,8 @@ std::shared_ptr<void> translateTTMetalToFlatbuffer(
     const std::vector<std::pair<std::string, std::string>> &moduleCache) {
   flatbuffers::FlatBufferBuilder fbb;
   FlatbufferObjectCache cache(&fbb);
+  llvm::DenseMap<const void *, flatbuffers::Offset<target::metal::BufferDesc>>
+      bufferDescCache;
 
   ModuleOp rootModule = dyn_cast<ModuleOp>(op);
   assert(rootModule && "Expected ModuleOp as top level operation");
@@ -854,8 +961,8 @@ std::shared_ptr<void> translateTTMetalToFlatbuffer(
 
     cqBuilder.inputs.reserve(entry.getBody().getArguments().size());
     for (auto &input : entry.getBody().getArguments()) {
-      cqBuilder.inputs.push_back(
-          cache.getOrCreate(input, bufferValueToFlatbuffer, systemDesc, 0));
+      cqBuilder.inputs.push_back(cache.getOrCreate(
+          input, bufferValueToFlatbuffer, systemDesc, 0, &bufferDescCache));
       tensorInputs.push_back(tensorValueToFlatbuffer(cache, input));
     }
 
@@ -864,8 +971,9 @@ std::shared_ptr<void> translateTTMetalToFlatbuffer(
       if (auto allocOp = dyn_cast_if_present<memref::AllocOp>(op); allocOp) {
         cqBuilder.appendCommand(
             target::metal::CreateHostAllocCommand(
-                fbb, cache.getOrCreate(allocOp.getResult(),
-                                       bufferValueToFlatbuffer, systemDesc, 0)),
+                fbb,
+                cache.getOrCreate(allocOp.getResult(), bufferValueToFlatbuffer,
+                                  systemDesc, 0, &bufferDescCache)),
             op);
       } else if (auto enqueueProgramOp =
                      dyn_cast_if_present<tt::ttmetal::EnqueueProgramOp>(op);
@@ -922,7 +1030,8 @@ std::shared_ptr<void> translateTTMetalToFlatbuffer(
             target::metal::CreateCreateBufferCommand(
                 fbb, cache.getOrCreate(createBufferOp.getResult(),
                                        bufferValueToFlatbuffer, systemDesc,
-                                       createBufferOp.getAddress())),
+                                       createBufferOp.getAddress(),
+                                       &bufferDescCache)),
             op);
       } else if (auto deallocateBufferOp =
                      dyn_cast_if_present<tt::ttmetal::DeallocateBufferOp>(op);
@@ -968,7 +1077,7 @@ std::shared_ptr<void> translateTTMetalToFlatbuffer(
         outs.reserve(cpuOp.getResults().size());
         for (auto result : cpuOp.getResults()) {
           outs.push_back(cache.getOrCreate(result, bufferValueToFlatbuffer,
-                                           systemDesc, 0));
+                                           systemDesc, 0, &bufferDescCache));
         }
         llvm::SmallString<24> funcName =
             utils::convertDylibFuncName(cpuOp.getCallee());
@@ -1003,7 +1112,7 @@ std::shared_ptr<void> translateTTMetalToFlatbuffer(
             target::metal::CreateHostAllocCommand(
                 fbb,
                 cache.getOrCreate(globalResult, bufferValueToFlatbuffer,
-                                  systemDesc, 0),
+                                  systemDesc, 0, &bufferDescCache),
                 memrefGlobalOpToFlatbufferByteVector(cache, globalOp)),
             op);
       } else if (auto meshShardOp =
@@ -1042,7 +1151,8 @@ std::shared_ptr<void> translateTTMetalToFlatbuffer(
             target::metal::CreateMeshShardCommand(
                 fbb, cache.at<target::metal::BufferRef>(meshShardOp.getInput()),
                 cache.getOrCreate(meshShardOp.getResult(),
-                                  bufferValueToFlatbuffer, systemDesc, 0),
+                                  bufferValueToFlatbuffer, systemDesc, 0,
+                                  &bufferDescCache),
                 meshShardType, meshShardDirection,
                 cache.fbb->CreateVector<int64_t>(meshShardOp.getShardShape()),
                 cache.fbb->CreateVector<int64_t>(meshShardOp.getShardDims())),
