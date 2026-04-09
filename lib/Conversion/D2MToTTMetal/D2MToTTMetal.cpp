@@ -18,10 +18,12 @@
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/PatternMatch.h"
 
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/TypeSwitch.h"
 
 #include <cstdint>
 #include <mlir-c/IR.h>
+#include <optional>
 
 namespace mlir::tt::ttmetal {
 
@@ -502,27 +504,45 @@ public:
     }
 
     ArrayAttr gridRanges = op.getGridRanges();
-    SmallVector<Value> mergedArgs;
+    SpatialRemapTable remapTable;
+    SmallVector<ttmetal::EnqueueProgramOp> regionEnqueues;
     SmallVector<Value> mergedCbs;
     SmallVector<int64_t> mergedCbPorts;
     SmallVector<Attribute> mergedKernelConfigs;
     ttcore::FabricConnectionConfigAttr mergedFabricConfig = nullptr;
     SmallVector<Operation *> preEnqueueOps;
     SmallVector<Operation *> postEnqueueOps;
-    SmallVector<Operation *> enqueueOpsToErase;
 
     for (auto [regionIndex, region] : llvm::enumerate(op.getRegions())) {
       auto spatialCoreRange =
           mlir::cast<ttcore::CoreRangeAttr>(gridRanges.getValue()[regionIndex]);
       CoreRangeAttr spatialMetalRange =
           ttCoreSpatialRangeToTtmetalCoreRange(rewriter, spatialCoreRange);
-      LogicalResult mergeResult = collectRegionOps(
-          region, spatialMetalRange, mergedArgs, mergedCbs, mergedCbPorts,
-          mergedKernelConfigs, mergedFabricConfig, preEnqueueOps,
-          postEnqueueOps, enqueueOpsToErase);
-      if (failed(mergeResult)) {
+      ttmetal::EnqueueProgramOp enqueueProgram = nullptr;
+      LogicalResult collectResult = collectRegionOps(
+          region, preEnqueueOps, postEnqueueOps, enqueueProgram);
+      if (failed(collectResult)) {
         return rewriter.notifyMatchFailure(
-            op, "failed to merge region enqueue_program ops");
+            op, "each spatial region must contain exactly one enqueue_program");
+      }
+      regionEnqueues.push_back(enqueueProgram);
+      remapTable.addEnqueueArgs(enqueueProgram);
+
+      llvm::append_range(mergedCbs, enqueueProgram.getCbs());
+      llvm::append_range(mergedCbPorts, enqueueProgram.getCbPorts());
+      for (Attribute kernelConfig : enqueueProgram.getKernelConfigs()) {
+        mergedKernelConfigs.push_back(remapKernelConfig(
+            kernelConfig, spatialMetalRange, enqueueProgram, remapTable));
+      }
+
+      auto enqueueFabricConfig = enqueueProgram.getFabricConnectionConfigAttr();
+      if (hasConflictingFabricConfig(mergedFabricConfig, enqueueFabricConfig)) {
+        return rewriter.notifyMatchFailure(
+            op, "failed to merge region enqueue_program ops due to fabric "
+                "config conflict");
+      }
+      if (enqueueFabricConfig) {
+        mergedFabricConfig = enqueueFabricConfig;
       }
     }
 
@@ -536,15 +556,15 @@ public:
     }
 
     rewriter.create<ttmetal::EnqueueProgramOp>(
-        op.getLoc(), mergedArgs, mergedCbs, mergedCbPorts,
+        op.getLoc(), remapTable.getUnifiedArgs(), mergedCbs, mergedCbPorts,
         rewriter.getArrayAttr(mergedKernelConfigs), mergedFabricConfig);
 
     for (Operation *operation : postEnqueueOps) {
       rewriter.moveOpBefore(operation, op);
     }
 
-    for (Operation *enqueueOp : enqueueOpsToErase) {
-      rewriter.eraseOp(enqueueOp);
+    for (ttmetal::EnqueueProgramOp enqueueProgram : regionEnqueues) {
+      rewriter.eraseOp(enqueueProgram);
     }
 
     rewriter.eraseOp(op);
@@ -552,23 +572,83 @@ public:
   }
 
 private:
-  static bool isArgIndexBasedKernelArg(ttkernel::ArgType argType) {
-    return argType == ttkernel::ArgType::BufferAddress ||
-           argType == ttkernel::ArgType::GlobalSemaphore;
-  }
+  class SpatialRemapTable {
+    using LocalKey = std::pair<Operation *, size_t>;
+
+    SmallVector<Value> unifiedArgs_;
+    DenseMap<Value, size_t> ioToUnifiedIdx_;
+    DenseMap<LocalKey, size_t> ioArgMap_;
+    DenseMap<LocalKey, size_t> globalSemaphoreArgMap_;
+
+  public:
+    void addEnqueueArgs(ttmetal::EnqueueProgramOp enqueueProgram) {
+      Operation *op = enqueueProgram.getOperation();
+      for (const auto [idx, arg] : llvm::enumerate(enqueueProgram.getArgs())) {
+        size_t localIdx = static_cast<size_t>(idx);
+        if (mlir::isa<ttmetal::GlobalSemaphoreType>(arg.getType())) {
+          size_t unifiedIdx = unifiedArgs_.size();
+          unifiedArgs_.push_back(arg);
+          globalSemaphoreArgMap_.insert({{op, localIdx}, unifiedIdx});
+          continue;
+        }
+
+        auto it = ioToUnifiedIdx_.find(arg);
+        size_t unifiedIdx;
+        if (it == ioToUnifiedIdx_.end()) {
+          unifiedIdx = unifiedArgs_.size();
+          ioToUnifiedIdx_.insert({arg, unifiedIdx});
+          unifiedArgs_.push_back(arg);
+        } else {
+          unifiedIdx = it->second;
+        }
+        ioArgMap_.insert({{op, localIdx}, unifiedIdx});
+      }
+    }
+
+    ArrayRef<Value> getUnifiedArgs() const { return unifiedArgs_; }
+
+    std::optional<size_t> lookupIO(ttmetal::EnqueueProgramOp enqueueProgram,
+                                   size_t localIdx) const {
+      auto it = ioArgMap_.find({enqueueProgram.getOperation(), localIdx});
+      if (it != ioArgMap_.end()) {
+        return it->second;
+      }
+      return std::nullopt;
+    }
+
+    std::optional<size_t>
+    lookupGlobalSemaphore(ttmetal::EnqueueProgramOp enqueueProgram,
+                          size_t localIdx) const {
+      auto it = globalSemaphoreArgMap_.find(
+          {enqueueProgram.getOperation(), localIdx});
+      if (it != globalSemaphoreArgMap_.end()) {
+        return it->second;
+      }
+      return std::nullopt;
+    }
+  };
 
   static KernelArgAttr remapKernelArg(Builder &builder, KernelArgAttr kernelArg,
-                                      size_t argsOffset) {
+                                      ttmetal::EnqueueProgramOp enqueueProgram,
+                                      const SpatialRemapTable &remapTable) {
     size_t operandIndex = kernelArg.getOperandIndex();
-    if (isArgIndexBasedKernelArg(kernelArg.getType())) {
-      operandIndex += argsOffset;
+    if (kernelArg.getType() == ttkernel::ArgType::BufferAddress) {
+      if (auto unified = remapTable.lookupIO(enqueueProgram, operandIndex)) {
+        operandIndex = *unified;
+      }
+    } else if (kernelArg.getType() == ttkernel::ArgType::GlobalSemaphore) {
+      if (auto unified =
+              remapTable.lookupGlobalSemaphore(enqueueProgram, operandIndex)) {
+        operandIndex = *unified;
+      }
     }
     return builder.getAttr<KernelArgAttr>(kernelArg.getType(), operandIndex);
   }
 
-  static KernelArgsAttr remapKernelArgs(Builder &builder,
-                                        KernelArgsAttr kernelArgs,
-                                        size_t argsOffset) {
+  static KernelArgsAttr
+  remapKernelArgs(Builder &builder, KernelArgsAttr kernelArgs,
+                  ttmetal::EnqueueProgramOp enqueueProgram,
+                  const SpatialRemapTable &remapTable) {
     SmallVector<KernelArgAttr> remappedRuntimeArgs;
     SmallVector<KernelArgAttr> remappedCompileTimeArgs;
     remappedRuntimeArgs.reserve(kernelArgs.getRtArgs().size());
@@ -576,11 +656,11 @@ private:
 
     for (KernelArgAttr runtimeArg : kernelArgs.getRtArgs()) {
       remappedRuntimeArgs.push_back(
-          remapKernelArg(builder, runtimeArg, argsOffset));
+          remapKernelArg(builder, runtimeArg, enqueueProgram, remapTable));
     }
     for (KernelArgAttr compileTimeArg : kernelArgs.getCtArgs()) {
       remappedCompileTimeArgs.push_back(
-          remapKernelArg(builder, compileTimeArg, argsOffset));
+          remapKernelArg(builder, compileTimeArg, enqueueProgram, remapTable));
     }
 
     return builder.getAttr<KernelArgsAttr>(remappedRuntimeArgs,
@@ -589,7 +669,8 @@ private:
 
   static Attribute remapKernelConfig(Attribute kernelConfig,
                                      CoreRangeAttr spatialCoreRange,
-                                     size_t argsOffset) {
+                                     ttmetal::EnqueueProgramOp enqueueProgram,
+                                     const SpatialRemapTable &remapTable) {
     Builder builder(kernelConfig.getContext());
     return TypeSwitch<Attribute, Attribute>(kernelConfig)
         .Case<ComputeConfigAttr>([&](ComputeConfigAttr computeConfig) {
@@ -597,7 +678,7 @@ private:
               computeConfig.getContext(), computeConfig.getKernelSymbol(),
               spatialCoreRange,
               remapKernelArgs(builder, computeConfig.getKernelArgs(),
-                              argsOffset),
+                              enqueueProgram, remapTable),
               computeConfig.getMathFidelity(), computeConfig.getFp32DestAccEn(),
               computeConfig.getDstFullSyncEn(),
               computeConfig.getMathApproxMode(),
@@ -607,7 +688,8 @@ private:
           return NocConfigAttr::get(
               nocConfig.getContext(), nocConfig.getKernelSymbol(),
               spatialCoreRange,
-              remapKernelArgs(builder, nocConfig.getKernelArgs(), argsOffset),
+              remapKernelArgs(builder, nocConfig.getKernelArgs(),
+                              enqueueProgram, remapTable),
               nocConfig.getNocIndex());
         })
         .Case<EthernetConfigAttr>([&](EthernetConfigAttr ethernetConfig) {
@@ -615,7 +697,7 @@ private:
               ethernetConfig.getContext(), ethernetConfig.getKernelSymbol(),
               spatialCoreRange,
               remapKernelArgs(builder, ethernetConfig.getKernelArgs(),
-                              argsOffset),
+                              enqueueProgram, remapTable),
               ethernetConfig.getEthType(), ethernetConfig.getNocIndex());
         })
         .Default(
@@ -630,16 +712,12 @@ private:
   }
 
   static LogicalResult
-  collectRegionOps(Region &region, CoreRangeAttr spatialCoreRange,
-                   SmallVector<Value> &args, SmallVector<Value> &cbs,
-                   SmallVector<int64_t> &cbPorts,
-                   SmallVector<Attribute> &kernelConfigs,
-                   ttcore::FabricConnectionConfigAttr &mergedFabricConfig,
-                   SmallVector<Operation *> &preEnqueueOps,
+  collectRegionOps(Region &region, SmallVector<Operation *> &preEnqueueOps,
                    SmallVector<Operation *> &postEnqueueOps,
-                   SmallVector<Operation *> &enqueueOpsToErase) {
+                   ttmetal::EnqueueProgramOp &regionEnqueueProgram) {
     Block &block = region.front();
     bool seenEnqueue = false;
+    unsigned enqueueCount = 0;
 
     for (Operation &innerOperation : block) {
       if (isa<d2m::SpatialYieldOp>(innerOperation)) {
@@ -648,26 +726,11 @@ private:
 
       if (auto enqueueProgram =
               dyn_cast<ttmetal::EnqueueProgramOp>(&innerOperation)) {
-        size_t argsOffset = args.size();
-        llvm::append_range(args, enqueueProgram.getArgs());
-        llvm::append_range(cbs, enqueueProgram.getCbs());
-        llvm::append_range(cbPorts, enqueueProgram.getCbPorts());
-        for (Attribute kernelConfig : enqueueProgram.getKernelConfigs()) {
-          kernelConfigs.push_back(
-              remapKernelConfig(kernelConfig, spatialCoreRange, argsOffset));
-        }
-
-        auto enqueueFabricConfig =
-            enqueueProgram.getFabricConnectionConfigAttr();
-        if (hasConflictingFabricConfig(mergedFabricConfig,
-                                       enqueueFabricConfig)) {
+        ++enqueueCount;
+        if (enqueueCount > 1) {
           return failure();
         }
-        if (enqueueFabricConfig) {
-          mergedFabricConfig = enqueueFabricConfig;
-        }
-
-        enqueueOpsToErase.push_back(enqueueProgram);
+        regionEnqueueProgram = enqueueProgram;
         seenEnqueue = true;
         continue;
       }
@@ -677,6 +740,9 @@ private:
       } else {
         postEnqueueOps.push_back(&innerOperation);
       }
+    }
+    if (enqueueCount != 1) {
+      return failure();
     }
     return success();
   }
