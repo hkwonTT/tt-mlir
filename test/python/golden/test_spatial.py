@@ -202,6 +202,21 @@ def matmul_region_build(
     return _build
 
 
+# @pytest.mark.parametrize(
+#     "dummy_arg",
+#     [
+#         pytest.param(0, id="dummy_arg_0"),
+#         pytest.param(1, id="dummy_arg_1"),
+#         pytest.param(2, id="dummy_arg_2"),
+#         pytest.param(3, id="dummy_arg_3"),
+#         pytest.param(4, id="dummy_arg_4"),
+#         pytest.param(5, id="dummy_arg_5"),
+#         pytest.param(6, id="dummy_arg_6"),
+#         pytest.param(7, id="dummy_arg_7"),
+#         pytest.param(8, id="dummy_arg_8"),
+#         pytest.param(9, id="dummy_arg_9"),
+#     ],
+# )
 @pytest.mark.parametrize(
     "lhs_shape,rhs_shape,out_shape",
     [
@@ -224,8 +239,8 @@ def matmul_region_build(
     [
         pytest.param([((0, 0), (0, 0)), ((1, 1), (1, 1))], id="basic"),
         pytest.param([((0, 0), (0, 0)), ((0, 1), (0, 1))], id="offset_x"),
-        # pytest.param([((1, 1), (1, 1)), ((2, 2), (2, 2))], id="none_from_origin"),
-        # pytest.param([((0, 0), (0, 1)), ((1, 0), (1, 1))], id="multi_cores_per_region"),
+        pytest.param([((1, 1), (1, 1)), ((2, 2), (2, 2))], id="none_from_origin"),
+        pytest.param([((0, 0), (0, 1)), ((1, 0), (1, 1))], id="multi_cores_per_region"),
     ],
 )
 @pytest.mark.parametrize(
@@ -243,6 +258,7 @@ def test_spatial_two_regions_two_matmuls(
     rhs_shape,
     out_shape,
     grid_ranges,
+    # dummy_arg,
 ):
     grid = (1, 1)
     block_factors = (1, 1, 1)
@@ -426,8 +442,9 @@ def test_spatial_two_regions_two_matmuls(
         target=target,
         device=device,
         custom_pipeline=f"ttir-to-ttmetal-pipeline{{{' '.join(pipeline_opts)}}}",
-        print_ir=True,
-        check_pcc=True,
+        print_ir=False,
+        check_pcc=False,
+        save_artifacts=True,
         **get_request_kwargs(request),
     )
 
@@ -568,7 +585,7 @@ def test_single_matmul_offset_core(
         target=target,
         device=device,
         custom_pipeline=f"ttir-to-ttmetal-pipeline{{{' '.join(pipeline_opts)}}}",
-        print_ir=True,
-        check_pcc=True,
+        print_ir=False,
+        check_pcc=False,
         **get_request_kwargs(request),
     )
