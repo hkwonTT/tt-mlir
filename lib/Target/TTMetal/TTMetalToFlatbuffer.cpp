@@ -473,6 +473,7 @@ memrefTypeToCircularBufferConfigFlatbuffer(
     FlatbufferObjectCache &cache, MemRefType memref, ttcore::DeviceAttr device,
     std::optional<AffineMap> virtualGridInverseMapping,
     std::optional<AffineMap> virtualGridForwardMapping) {
+  (void)virtualGridForwardMapping;
   auto deviceLayout = mlir::dyn_cast_if_present<ttcore::DeviceLayoutInterface>(
       memref.getLayout());
   if (!deviceLayout) {
@@ -486,13 +487,22 @@ memrefTypeToCircularBufferConfigFlatbuffer(
   SmallVector<int64_t> memrefGridShape = getPhysicalGridShapeForVirtualGrid(
       shardLayout, device, memref, virtualGridInverseMapping);
 
-  AffineMap gridToPhysCore = shardGridToPhysCoreMapForPlacement(
-      memref, device, memrefGridShape, virtualGridForwardMapping);
-
-  // Circular buffers must be declared on the same cores as the L1 shard they
-  // back. Derive core_range_set from the memref shard grid and placement map.
+  // Temporary workaround: derive circular_buffer_config core_range_set from the
+  // full worker grid (historical spoof). CB memrefs are often lowered with a
+  // 1x1 logical grid while kernels run on a subgrid; sampling only the memref
+  // grid under-declares CB cores. ShardedBufferConfig shard_spec may still use
+  // the tighter memref-based core_range_set by design.
+  AffineMap virtToPhys = device.getWorkerGrid().getVirtToPhysicalMap();
+  AffineMap extendedMapping =
+      extendMappingForHigherDimGrid(virtToPhys, memrefGridShape.size());
+  SmallVector<int64_t> workerGridShape =
+      llvm::to_vector(device.getWorkerGrid().getShape());
+  if (workerGridShape.size() < memrefGridShape.size()) {
+    workerGridShape.insert(workerGridShape.begin(),
+                           memrefGridShape.size() - workerGridShape.size(), 1);
+  }
   std::vector<target::Dim2dRange> coreRangeSet =
-      toFlatbuffer(cache, memrefGridShape, gridToPhysCore);
+      toFlatbuffer(cache, workerGridShape, extendedMapping);
 
   uint64_t pageSize = device.getMemrefCBPageSizeBytes(memref);
   uint64_t shardSize =
