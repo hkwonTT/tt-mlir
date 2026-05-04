@@ -478,11 +478,18 @@ def test_single_allgather(
             )
             out_tensor = d2m.mesh_shard(
                 input.type,
-                spatial_results[0],
+                spatial_results,
                 shard_direction=shard_to_full_attr,
                 shard_type=shard_type_attr,
                 shard_shape=shard_shape,
                 shard_dims=shard_dims,
+            )
+
+            input_g = torch.randn(full_input_shape, dtype=torch.float32)
+            golden = input_g
+            builder.set_goldens(
+                {input: input_g},
+                {out_tensor: golden},
             )
             return out_tensor
 
