@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from builder.base.builder_enums import MeshShardDirection, MeshShardType
+import numpy as np
 import pytest
 import torch
 from typing import Callable, List, Optional, OrderedDict, Tuple
@@ -160,9 +161,9 @@ def all_gather_region_build(
             indexing_maps=(),
             iterator_types=[],
         )
-        def ag_1x8(input, output, additional_args):
-            _load_sem = additional_args[0]
-            _store_sem = additional_args[1]
+        def ag_1x8(input, output):
+            _load_sem = load_sem
+            _store_sem = store_sem
             mesh_row = d2m.mesh_position(dim=0)
             c1 = arith.constant(IndexType.get(ctx), 1)
             c0 = arith.constant(IndexType.get(ctx), 0)
@@ -177,7 +178,7 @@ def all_gather_region_build(
             mesh_col = d2m.mesh_position(dim=1)
             idx_row = affine.apply(map2, [mesh_col, core0_1, c0])
             idx_col = affine.apply(map3, [mesh_col, core0_1, c0])
-            stored = builder.remote_store(
+            stored = d2m.remote_store(
                 output.type,
                 output,
                 [idx_row, idx_col],
@@ -190,7 +191,7 @@ def all_gather_region_build(
             d2m.semaphore_wait(store_sem, c_wait)
             d2m.yield_([stored])
 
-        d2m.spatial_yield(ag_1x8(input, output, additional_args=[load_sem, store_sem]))
+        d2m.spatial_yield([ag_1x8(input, output)])
 
     return _build
 
@@ -383,9 +384,7 @@ def test_single_matmul_offset_core(
 def _global_semaphore_backing_tensor_type(ctx: Context) -> RankedTensorType:
     """8x8x1x1 ui32 L1 sharded backing tensor for create_global_semaphore."""
 
-    i64 = IntegerType.get_signless(64)
-    collapse_ty = RankedTensorType.get([2, 2], i64)
-    collapse = DenseElementsAttr.get([[0, 1], [1, 2]], type=collapse_ty)
+    collapse = DenseElementsAttr.get(np.array([[0, 1], [1, 2]], dtype=np.int64))
     layout = ttcore.ir.MetalLayoutAttr.get(
         ctx,
         [8, 8],
