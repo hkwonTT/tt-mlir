@@ -429,10 +429,22 @@ def test_single_allgather(
     def module(builder: D2MBuilder):
         @builder.func([full_input_shape], [torch.float32])
         def all_gather(input: Operand, builder: D2MBuilder):
-            in_shard = builder.mesh_shard(
+            # Temporary workaround until D2MBuilder exposes mesh_shard helper.
+            shard_type_attr = ttcore.ir.MeshShardTypeAttr.get(
+                input.context, ttcore.ir.MeshShardType.Devices
+            )
+            full_to_shard_attr = ttcore.ir.MeshShardDirectionAttr.get(
+                input.context, ttcore.ir.MeshShardDirection.FullToShard
+            )
+            shard_to_full_attr = ttcore.ir.MeshShardDirectionAttr.get(
+                input.context, ttcore.ir.MeshShardDirection.ShardToFull
+            )
+            in_shard_type = RankedTensorType.get(test_shape, input.type.element_type)
+            in_shard = d2m.mesh_shard(
+                in_shard_type,
                 input,
-                shard_direction=MeshShardDirection.FullToShard.value,
-                shard_type=MeshShardType.Devices.value,
+                shard_direction=full_to_shard_attr,
+                shard_type=shard_type_attr,
                 shard_shape=shard_shape,
                 shard_dims=shard_dims,
             )
@@ -465,10 +477,11 @@ def test_single_allgather(
                 region_builders,
                 result_types=[out_shard.type],
             )
-            out_tensor = builder.mesh_shard(
+            out_tensor = d2m.mesh_shard(
+                input.type,
                 spatial_results[0],
-                shard_direction=MeshShardDirection.ShardToFull.value,
-                shard_type=MeshShardType.Devices.value,
+                shard_direction=shard_to_full_attr,
+                shard_type=shard_type_attr,
                 shard_shape=shard_shape,
                 shard_dims=shard_dims,
             )
