@@ -148,7 +148,6 @@ def all_gather_region_build(
 ) -> Callable[[], None]:
     def _build():
         ctx = builder.context
-        c_wait = arith.constant(IndexType.get(ctx), 7)
         d0 = AffineDimExpr.get(0, ctx)
         d1 = AffineDimExpr.get(1, ctx)
         d2 = AffineDimExpr.get(2, ctx)
@@ -168,6 +167,7 @@ def all_gather_region_build(
             c1 = arith.constant(IndexType.get(ctx), 1)
             c0 = arith.constant(IndexType.get(ctx), 0)
             c8 = arith.constant(IndexType.get(ctx), 8)
+            c_wait = arith.constant(IndexType.get(ctx), 7)
             core0 = d2m.core_index(0)
             core1 = d2m.core_index(1)
             d2m.device_synchronize(
@@ -188,10 +188,18 @@ def all_gather_region_build(
                 local_buffer=loaded,
                 semaphore=_store_sem,
             )
-            d2m.semaphore_wait(store_sem, c_wait)
+            d2m.semaphore_wait(_store_sem, c_wait)
             d2m.yield_([stored])
 
-        d2m.spatial_yield([ag_1x8(input, output)])
+        d2m.spatial_yield(
+            [
+                ag_1x8(
+                    input,
+                    output,
+                    additional_args=[load_sem, store_sem],
+                )
+            ]
+        )
 
     return _build
 
@@ -513,5 +521,8 @@ def test_single_allgather(
         mesh_name="mesh",
         mesh_dict=OrderedDict([("x", mesh_shape[0]), ("y", mesh_shape[1])]),
         pipeline_options=pipeline_options,
+        print_ir=True,
+        save_artifacts=True,
+        check_pcc=False,
         **get_request_kwargs(request),
     )
