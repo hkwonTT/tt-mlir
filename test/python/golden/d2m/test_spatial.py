@@ -156,7 +156,7 @@ def all_gather_region_build(
         map3 = AffineMap.get(3, 0, [d0 + d2], ctx)
 
         @builder.generic(
-            grid=(2, 1),
+            grid=(1, 1),
             block_factors=(),
             indexing_maps=(),
             iterator_types=[],
