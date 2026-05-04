@@ -426,6 +426,15 @@ def test_single_allgather(
         full_input_shape[d] *= factor
 
     def module(builder: D2MBuilder):
+        # Experimental workaround: pre-register a default device symbol so
+        # d2m.create_global_semaphore verifier can resolve ttcore.lookupDevice
+        # during module printing, before ttcore-register-device pass runs.
+        system_desc = ttcore.ir.SystemDescAttr.get_default(builder.context)
+        device_attr = ttcore.ir.DeviceAttr.from_system_desc(
+            builder.context, system_desc, [1, 1]
+        )
+        ttcore.DeviceOp("default_device", device_attr)
+
         @builder.func([full_input_shape], [torch.float32])
         def all_gather(input: Operand, builder: D2MBuilder):
             # Temporary workaround until D2MBuilder exposes mesh_shard helper.
