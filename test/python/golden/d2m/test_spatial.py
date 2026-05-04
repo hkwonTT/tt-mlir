@@ -402,7 +402,7 @@ def _global_semaphore_backing_tensor_type(ctx: Context) -> RankedTensorType:
 @pytest.mark.parametrize(
     "mesh_shape",
     [
-        pytest.param((1, 8), id="1x1"),
+        pytest.param((1, 8), id="1x8"),
     ],
 )
 @pytest.mark.parametrize(
