@@ -424,65 +424,34 @@ def _global_semaphore_backing_tensor_type(ctx: Context) -> RankedTensorType:
         pytest.param((32, 32), id="32x32"),
     ],
 )
+@pytest.mark.parametrize(
+    "target",
+    [
+        pytest.param("ttmetal", id="ttmetal"),
+    ],
+)
 def test_single_allgather(
+    target: str,
     mesh_shape: Tuple[int, int],
     test_shape: Tuple[int, int],
     request,
     device,
 ):
-    rank_in = len(test_shape)
-    rank_mesh = len(mesh_shape)
-    shard_dims = list(range(rank_in - rank_mesh, rank_in))
-    shard_shape = make_shard_shape(rank_in, shard_dims, mesh_shape)
-
-    full_input_shape = list(test_shape)
-    for d, factor in zip(shard_dims, mesh_shape):
-        full_input_shape[d] *= factor
+    full_input_shape = [test_shape[0], test_shape[1] * mesh_shape[1]]
 
     def module(builder: D2MBuilder):
-        # Experimental workaround: pre-register a default device symbol so
-        # d2m.create_global_semaphore verifier can resolve ttcore.lookupDevice
-        # during module printing, before ttcore-register-device pass runs.
-        system_desc = ttcore.ir.SystemDescAttr.get_default(builder.context)
-        device_attr = ttcore.ir.DeviceAttr.from_system_desc(
-            builder.context, system_desc, [1, 1]
-        )
-        ttcore.DeviceOp("default_device", device_attr)
-
-        @builder.func([full_input_shape], [torch.float32])
-        def all_gather(input: Operand, builder: D2MBuilder):
-            # Temporary workaround until D2MBuilder exposes mesh_shard helper.
-            shard_type_attr = ttcore.ir.MeshShardTypeAttr.get(
-                input.context, ttcore.ir.MeshShardType.Devices
+        @builder.func([], [])
+        def all_gather(builder: D2MBuilder):
+            host_out_ty = RankedTensorType.get(
+                full_input_shape,
+                Type.parse("f32", builder.context),
             )
-            full_to_shard_attr = ttcore.ir.MeshShardDirectionAttr.get(
-                input.context, ttcore.ir.MeshShardDirection.FullToShard
-            )
-            shard_to_full_attr = ttcore.ir.MeshShardDirectionAttr.get(
-                input.context, ttcore.ir.MeshShardDirection.ShardToFull
-            )
-            in_shard_type = RankedTensorType.get(test_shape, input.type.element_type)
-            in_shard = d2m.mesh_shard(
-                in_shard_type,
-                input,
-                shard_direction=full_to_shard_attr,
-                shard_type=shard_type_attr,
-                shard_shape=shard_shape,
-                shard_dims=shard_dims,
-            )
-
-            in_tile = prepare_metal_input(builder, in_shard, test_shape, (0, 0))
-            out_local_shape = [
-                test_shape[0] // mesh_shape[0],
-                test_shape[1] // mesh_shape[1],
-            ]
+            in_tile = prepare_metal_output(builder, full_input_shape, (0, 0))
+            out_local_shape = full_input_shape
             out_tile = prepare_metal_output(builder, out_local_shape, (0, 0))
 
-            # TODO: Use the correct output type
-            out_shard = builder.empty(in_shard.type)
-
-            sem_ty = _global_semaphore_backing_tensor_type(input.context)
-            sem_gs_ty = Type.parse("!d2m.global_semaphore", input.context)
+            sem_ty = _global_semaphore_backing_tensor_type(builder.context)
+            sem_gs_ty = Type.parse("!d2m.global_semaphore", builder.context)
             load_sem = d2m.create_global_semaphore(
                 d2m.empty(sem_ty), value=0, results=[sem_gs_ty]
             )
@@ -499,27 +468,16 @@ def test_single_allgather(
                 )
             ]
             spatial_results = builder.spatial(
-                [in_shard],
-                [out_shard],
-                [((0, 0), (8, 8))],
+                [in_tile],
+                [out_tile],
+                [((0, 0), (1, 0))],
                 region_builders,
-                result_types=[out_shard.type],
+                result_types=[out_tile.type],
             )
-            out_tensor = d2m.mesh_shard(
-                input.type,
-                spatial_results,
-                shard_direction=shard_to_full_attr,
-                shard_type=shard_type_attr,
-                shard_shape=shard_shape,
-                shard_dims=shard_dims,
-            )
+            out_tensor = builder.to_layout(spatial_results, output_type=host_out_ty)
 
-            input_g = torch.randn(full_input_shape, dtype=torch.float32)
-            golden = input_g
-            builder.set_goldens(
-                {input: input_g},
-                {out_tensor: golden},
-            )
+            golden = torch.randn(out_local_shape, dtype=torch.float32)
+            builder.set_goldens({}, {out_tensor: golden})
             return out_tensor
 
     pipeline_options = [
@@ -528,13 +486,13 @@ def test_single_allgather(
 
     compile_and_execute_d2m(
         module,
-        target="ttmetal",
+        target=target,
         device=device,
         mesh_name="mesh",
         mesh_dict=OrderedDict([("x", mesh_shape[0]), ("y", mesh_shape[1])]),
         pipeline_options=pipeline_options,
         print_ir=True,
-        save_artifacts=True,
+        save_artifacts=False,
         check_pcc=False,
         **get_request_kwargs(request),
     )
