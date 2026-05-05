@@ -16,6 +16,7 @@ from ttmlir.ir import (
     AffineMap,
     AffineMapAttr,
     Context,
+    DenseI64ArrayAttr,
     DenseElementsAttr,
     IndexType,
     IntegerType,
@@ -73,8 +74,11 @@ def prepare_metal_input(
     input_tensor: Operand,
     input_shape: List[int],
     core_start: Tuple[int, int],
+    grid_shape: Tuple[int, int] = (1, 1),
 ) -> Operand:
-    metal_type = builder.get_metal_tensor_layout(input_shape, tiled=True)
+    metal_type = builder.get_metal_tensor_layout(
+        input_shape, tiled=True, grid=grid_shape
+    )
     (
         virtual_grid_inverse_mapping,
         virtual_grid_forward_mapping,
@@ -87,12 +91,82 @@ def prepare_metal_input(
     return builder.to_layout(input_tensor, output=output)
 
 
+def prepare_mesh_sharded_metal_input(
+    builder: D2MBuilder,
+    input_tensor: Operand,
+    input_shape: List[int],
+    mesh_shape: Tuple[int, int],
+    core_start: Tuple[int, int],
+    grid_shape: Tuple[int, int] = (1, 1),
+) -> Operand:
+    rank_in = len(input_shape)
+    rank_mesh = len(mesh_shape)
+    shard_dims = list(range(rank_in - rank_mesh, rank_in))
+    shard_shape = make_shard_shape(rank_in, shard_dims, mesh_shape)
+    sharded_shape = list(input_shape)
+    for dim, factor in zip(shard_dims, mesh_shape):
+        sharded_shape[dim] = sharded_shape[dim] // factor
+
+    shard_type_attr = ttcore.ir.MeshShardTypeAttr.get(
+        builder.context, MeshShardType.Devices.value
+    )
+    shard_direction_attr = ttcore.ir.MeshShardDirectionAttr.get(
+        builder.context, MeshShardDirection.FullToShard.value
+    )
+    mesh_sharded_ty = Type.parse(
+        f'tensor<{"x".join([str(d) for d in sharded_shape])}xf32, #ttcore.tensor_mesh<"mesh">>',
+        builder.context,
+    )
+
+    mesh_sharded = d2m.mesh_shard(
+        mesh_sharded_ty,
+        input_tensor,
+        shard_type_attr,
+        shard_direction_attr,
+        DenseI64ArrayAttr.get(shard_shape),
+        DenseI64ArrayAttr.get(shard_dims),
+    )
+    return prepare_metal_input(
+        builder, mesh_sharded, sharded_shape, core_start, grid_shape=grid_shape
+    )
+
+
+def prepare_mesh_sharded_output(
+    builder: D2MBuilder,
+    input_tensor: Operand,
+    output_shape: List[int],
+    mesh_shape: Tuple[int, int],
+    output_type: Optional[Type] = None,
+) -> Operand:
+    rank_in = len(output_shape)
+    rank_mesh = len(mesh_shape)
+    shard_dims = list(range(rank_in - rank_mesh, rank_in))
+    shard_shape = make_shard_shape(rank_in, shard_dims, mesh_shape)
+
+    if output_type is None:
+        output_type = RankedTensorType.get(output_shape, input_tensor.type.element_type)
+
+    return d2m.mesh_shard(
+        output_type,
+        input_tensor,
+        ttcore.ir.MeshShardTypeAttr.get(builder.context, MeshShardType.Devices.value),
+        ttcore.ir.MeshShardDirectionAttr.get(
+            builder.context, MeshShardDirection.ShardToFull.value
+        ),
+        DenseI64ArrayAttr.get(shard_shape),
+        DenseI64ArrayAttr.get(shard_dims),
+    )
+
+
 def prepare_metal_output(
     builder: D2MBuilder,
     out_shape: List[int],
     core_start: Tuple[int, int],
+    grid_shape: Tuple[int, int] = (1, 1),
 ):
-    out_metal_ty = builder.get_metal_tensor_layout(out_shape, tiled=True)
+    out_metal_ty = builder.get_metal_tensor_layout(
+        out_shape, tiled=True, grid=grid_shape
+    )
     (
         virtual_grid_inverse_mapping,
         virtual_grid_forward_mapping,
@@ -170,7 +244,7 @@ def all_gather_region_build(
         map3 = AffineMap.get(3, 0, [d0 + d2], ctx)
 
         @builder.generic(
-            grid=(1, 1),
+            grid=(2, 1),
             block_factors=(),
             indexing_maps=(),
             iterator_types=[],
@@ -431,7 +505,7 @@ def _global_semaphore_backing_tensor_type(ctx: Context) -> RankedTensorType:
 @pytest.mark.parametrize(
     "test_shape",
     [
-        pytest.param((32, 32), id="32x32"),
+        pytest.param((256, 256), id="256x256"),
     ],
 )
 @pytest.mark.parametrize(
@@ -449,21 +523,33 @@ def test_single_allgather(
 ):
     system_desc_path = request.config.getoption("--sys-desc")
     full_input_shape = [test_shape[0], test_shape[1] * mesh_shape[1]]
+    full_output_shape = [full_input_shape[0], full_input_shape[1] * mesh_shape[1]]
 
     def module(builder: D2MBuilder):
         _insert_default_device_from_system_desc(
             builder.context, system_desc_path, mesh_shape
         )
 
-        @builder.func([], [])
-        def all_gather(builder: D2MBuilder):
+        @builder.func([full_input_shape], [torch.float32])
+        def all_gather(inp: Operand, builder: D2MBuilder):
             host_out_ty = RankedTensorType.get(
-                full_input_shape,
+                full_output_shape,
                 Type.parse("f32", builder.context),
             )
-            in_tile = prepare_metal_output(builder, full_input_shape, (0, 0))
+            in_grid_shape = (2, 1)
+            in_tile = prepare_mesh_sharded_metal_input(
+                builder,
+                inp,
+                full_input_shape,
+                mesh_shape,
+                (0, 0),
+                grid_shape=in_grid_shape,
+            )
             out_local_shape = full_input_shape
-            out_tile = prepare_metal_output(builder, out_local_shape, (0, 0))
+            out_grid_shape = (2, 8)
+            out_tile = prepare_metal_output(
+                builder, out_local_shape, (0, 0), grid_shape=out_grid_shape
+            )
 
             sem_ty = _global_semaphore_backing_tensor_type(builder.context)
             sem_gs_ty = Type.parse("!d2m.global_semaphore", builder.context)
@@ -489,10 +575,26 @@ def test_single_allgather(
                 region_builders,
                 result_types=[out_tile.type],
             )
-            out_tensor = builder.to_layout(spatial_results, output_type=host_out_ty)
+            mesh_out_ty = Type.parse(
+                f'tensor<{full_input_shape[0]}x{full_input_shape[1]}xf32, #ttcore.tensor_mesh<"mesh">>',
+                builder.context,
+            )
+            out_mesh_tensor = builder.to_layout(
+                spatial_results, output_type=mesh_out_ty
+            )
+            out_tensor = prepare_mesh_sharded_output(
+                builder,
+                out_mesh_tensor,
+                full_output_shape,
+                mesh_shape,
+                output_type=host_out_ty,
+            )
 
-            golden = torch.randn(out_local_shape, dtype=torch.float32)
-            builder.set_goldens({}, {out_tensor: golden}, set_all_outputs=False)
+            inp_golden = torch.randn(full_input_shape, dtype=torch.float32)
+            golden = torch.cat([inp_golden for _ in range(mesh_shape[1])], dim=1)
+            builder.set_goldens(
+                {inp: inp_golden}, {out_tensor: golden}, set_all_outputs=False
+            )
             return []
 
     pipeline_options = [
@@ -507,7 +609,7 @@ def test_single_allgather(
         mesh_dict=OrderedDict([("x", mesh_shape[0]), ("y", mesh_shape[1])]),
         pipeline_options=pipeline_options,
         print_ir=True,
-        save_artifacts=False,
+        save_artifacts=True,
         check_pcc=False,
         **get_request_kwargs(request),
     )
