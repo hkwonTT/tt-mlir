@@ -199,7 +199,6 @@ def build_module(
     mesh_dict: OrderedDict[str, int] = OrderedDict([("x", 1), ("y", 1)]),
     save_artifacts: bool = False,
     artifact_dir: str = ".",
-    print_module: bool = True,
 ) -> Tuple[Module, Union[TTIRBuilder, StableHLOBuilder, TTNNBuilder, D2MBuilder]]:
     """
     Build an MLIR `Module` from a Python emission function using the chosen builder.
@@ -246,9 +245,8 @@ def build_module(
     with ctx, loc:
         new_module = _compile(mod, builder)
 
-        if print_module:
-            print(f"`{mod.__name__}` successfully transformed into a MLIR module.")
-            print(new_module)
+        print(f"`{mod.__name__}` successfully transformed into a MLIR module.")
+        print(new_module)
 
         if save_artifacts:
             os.makedirs(artifact_dir, exist_ok=True)
@@ -283,7 +281,6 @@ def compile_and_execute_d2m(
     check_rtol: bool = False,
     enable_intermediate_verification: bool = False,
     dump_memory: bool = False,
-    print_module: bool = True,
 ) -> str:
     """
     Compiles and executes a D2MBuilder function through the complete pipeline.
@@ -367,7 +364,6 @@ def compile_and_execute_d2m(
         check_rtol=check_rtol,
         enable_intermediate_verification=enable_intermediate_verification,
         dump_memory=dump_memory,
-        print_module=print_module,
     )
 
 
@@ -933,7 +929,6 @@ def compile_d2m_to_flatbuffer(
     pipeline_options: Optional[List[str]] = None,
     print_ir: Union[bool, str] = False,
     device=None,
-    print_module: bool = True,
 ) -> str:
     """
     Compiles a D2MBuilder function `fn` to D2M MLIR -> TTMetal MLIR -> Flatbuffer.
@@ -1002,7 +997,6 @@ def compile_d2m_to_flatbuffer(
             mesh_dict=mesh_dict,
             save_artifacts=save_artifacts,
             artifact_dir=artifact_dir,
-            print_module=print_module,
         )
     except Exception as e:
         raise TTBuilderCompileException(e)

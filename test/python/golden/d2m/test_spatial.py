@@ -23,7 +23,7 @@ from ttmlir.ir import (
     Type,
 )
 
-from builder.base.builder_utils import Operand, create_custom_ttir_pipeline_fn
+from builder.base.builder_utils import Operand
 from builder.d2m.d2m_builder import D2MBuilder
 from builder.base.builder_apis import compile_and_execute_d2m
 from ttmlir.dialects import affine, arith, d2m, tensor, ttcore
@@ -481,13 +481,8 @@ def test_single_allgather(
             return []
 
     pipeline_options = [
-        "mesh-topology=linear,ring",
+        f"mesh-topology=linear,ring",
     ]
-    custom_pipeline = create_custom_ttir_pipeline_fn(
-        "ttir-to-ttmetal-pipeline",
-        verify=False,
-        print_ir=False,
-    )
 
     compile_and_execute_d2m(
         module,
@@ -495,11 +490,9 @@ def test_single_allgather(
         device=device,
         mesh_name="mesh",
         mesh_dict=OrderedDict([("x", mesh_shape[0]), ("y", mesh_shape[1])]),
-        custom_pipeline=custom_pipeline,
         pipeline_options=pipeline_options,
-        print_ir=False,
+        print_ir=True,
         save_artifacts=False,
         check_pcc=False,
-        print_module=False,
         **get_request_kwargs(request),
     )
