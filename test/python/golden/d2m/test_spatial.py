@@ -58,6 +58,16 @@ def _build_virtual_grid_attrs(
     return AffineMapAttr.get(vgm_inv), AffineMapAttr.get(vgm_fwd)
 
 
+def _insert_default_device_from_system_desc(
+    ctx: Context, system_desc_path: str, mesh_shape: Tuple[int, int]
+) -> None:
+    system_desc = ttcore.ir.SystemDescAttr.get_from_path(ctx, system_desc_path)
+    device_attr = ttcore.ir.DeviceAttr.from_system_desc(
+        ctx, system_desc, list(mesh_shape)
+    )
+    ttcore.DeviceOp("default_device", device_attr)
+
+
 def prepare_metal_input(
     builder: D2MBuilder,
     input_tensor: Operand,
@@ -437,9 +447,14 @@ def test_single_allgather(
     request,
     device,
 ):
+    system_desc_path = request.config.getoption("--sys-desc")
     full_input_shape = [test_shape[0], test_shape[1] * mesh_shape[1]]
 
     def module(builder: D2MBuilder):
+        _insert_default_device_from_system_desc(
+            builder.context, system_desc_path, mesh_shape
+        )
+
         @builder.func([], [])
         def all_gather(builder: D2MBuilder):
             host_out_ty = RankedTensorType.get(

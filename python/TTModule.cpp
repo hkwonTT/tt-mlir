@@ -9,8 +9,10 @@
 #include "mlir/CAPI/AffineMap.h"
 #include "mlir/CAPI/IR.h"
 #include "mlir/IR/AffineMap.h"
+#include "mlir/IR/Diagnostics.h"
 
 #include <cstdint>
+#include <stdexcept>
 #include <vector>
 
 namespace mlir::ttmlir::python {
@@ -330,6 +332,19 @@ void populateTTModule(nb::module_ &m) {
                   [](MlirContext ctx) {
                     return wrap(
                         tt::ttcore::SystemDescAttr::getDefault(unwrap(ctx)));
+                  })
+      .def_static("get_from_path",
+                  [](MlirContext ctx, const std::string &path) {
+                    auto systemDesc = tt::ttcore::SystemDescAttr::getFromPath(
+                        unwrap(ctx), path, [&]() -> mlir::InFlightDiagnostic {
+                          return mlir::emitError(
+                              mlir::UnknownLoc::get(unwrap(ctx)));
+                        });
+                    if (mlir::failed(systemDesc)) {
+                      throw std::runtime_error(
+                          "failed to load SystemDescAttr from path: " + path);
+                    }
+                    return wrap(*systemDesc);
                   })
       .def_static(
           "get",
