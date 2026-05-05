@@ -477,8 +477,8 @@ def test_single_allgather(
             out_tensor = builder.to_layout(spatial_results, output_type=host_out_ty)
 
             golden = torch.randn(out_local_shape, dtype=torch.float32)
-            builder.set_goldens({}, {out_tensor: golden})
-            return out_tensor
+            builder.set_goldens({}, {out_tensor: golden}, set_all_outputs=False)
+            return []
 
     pipeline_options = [
         f"mesh-topology=linear,ring",
