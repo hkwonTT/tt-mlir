@@ -10,6 +10,7 @@ from typing import Callable, List, Optional, OrderedDict, Tuple
 
 from ttmlir.dialects import arith, d2m, tensor
 from ttmlir.ir import (
+    Attribute,
     AffineConstantExpr,
     AffineDimExpr,
     AffineMap,
@@ -148,6 +149,10 @@ def all_gather_region_build(
 ) -> Callable[[], None]:
     def _build():
         ctx = builder.context
+        fabric_connection_config = Attribute.parse(
+            "#ttcore.fabric_connection_config<noc_index = noc0, topology = ring, cluster_axis = 1, routing_mode = unidir_ring_torus, num_links = 1>",
+            ctx,
+        )
         d0 = AffineDimExpr.get(0, ctx)
         d1 = AffineDimExpr.get(1, ctx)
         d2 = AffineDimExpr.get(2, ctx)
@@ -159,6 +164,7 @@ def all_gather_region_build(
             block_factors=(),
             indexing_maps=(),
             iterator_types=[],
+            fabric_connection_config=fabric_connection_config,
         )
         def ag_1x8(input, output):
             _load_sem = load_sem
@@ -484,7 +490,13 @@ def test_single_allgather(
                 d2m.empty(sem_ty), value=0, results=[sem_gs_ty]
             )
             region_builders = [
-                all_gather_region_build(builder, in_tile, out_tile, load_sem, store_sem)
+                all_gather_region_build(
+                    builder,
+                    in_tile,
+                    out_tile,
+                    load_sem,
+                    store_sem,
+                )
             ]
             spatial_results = builder.spatial(
                 [in_shard],
