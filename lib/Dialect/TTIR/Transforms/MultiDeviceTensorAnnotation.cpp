@@ -73,13 +73,17 @@ handleRestOpsForMultiDeviceTensorAnnotation(mlir::OpBuilder &builder,
     return;
   }
 
-  auto resultType =
-      mlir::cast<mlir::RankedTensorType>(srcOp->getResult(0).getType());
-  if (auto tensorMeshAttr =
-          mlir::dyn_cast_if_present<mlir::tt::ttcore::TensorMeshAttr>(
-              resultType.getEncoding())) {
-    for (auto arg : srcOp->getOperands()) {
-      annotateMeshToValue(arg, tensorMeshAttr);
+  if (auto resultType = mlir::dyn_cast<mlir::RankedTensorType>(
+          srcOp->getResult(0).getType())) {
+    if (auto tensorMeshAttr =
+            mlir::dyn_cast_if_present<mlir::tt::ttcore::TensorMeshAttr>(
+                resultType.getEncoding())) {
+      for (auto arg : srcOp->getOperands()) {
+        if (!mlir::isa<mlir::RankedTensorType>(arg.getType())) {
+          continue;
+        }
+        annotateMeshToValue(arg, tensorMeshAttr);
+      }
     }
   }
   return;
@@ -120,6 +124,11 @@ public:
     for (auto funcOp : moduleOp.getOps<mlir::func::FuncOp>()) {
       funcOp->walk<mlir::WalkOrder::PostOrder, mlir::ReverseIterator>(
           [&](mlir::Operation *op) {
+            // This pass only annotates TTIR ops. Skip ops from other dialects
+            // (e.g. D2M) defensively.
+            if (op->getDialect()->getNamespace() != "ttir") {
+              return mlir::WalkResult::advance();
+            }
             if (mlir::isa<mlir::func::ReturnOp>(op)) {
               return mlir::WalkResult::skip();
             }
