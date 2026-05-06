@@ -9,6 +9,7 @@ import torch
 from typing import Callable, List, Optional, OrderedDict, Tuple
 
 from ttmlir.dialects import arith, d2m, tensor
+import _ttmlir_runtime as tt_runtime
 from ttmlir.ir import (
     Attribute,
     AffineConstantExpr,
@@ -583,10 +584,14 @@ def _global_semaphore_backing_tensor_type(ctx: Context) -> RankedTensorType:
         pytest.param("ttmetal", id="ttmetal"),
     ],
 )
+@pytest.mark.parametrize(
+    "fabric_config", [tt_runtime.runtime.FabricConfig.FABRIC_1D_RING]
+)
 def test_single_allgather(
     target: str,
     mesh_shape: Tuple[int, int],
     test_shape: Tuple[int, int],
+    fabric_config: tt_runtime.runtime.FabricConfig,
     request,
     device,
 ):
@@ -677,7 +682,7 @@ def test_single_allgather(
         pipeline_options=pipeline_options,
         print_ir=True,
         save_artifacts=True,
-        check_pcc=False,
+        check_pcc=True,
         **get_request_kwargs(request),
     )
 
@@ -700,10 +705,14 @@ def test_single_allgather(
         pytest.param("ttmetal", id="ttmetal"),
     ],
 )
+@pytest.mark.parametrize(
+    "fabric_config", [tt_runtime.runtime.FabricConfig.FABRIC_1D_RING]
+)
 def test_single_allgather_no_spatial(
     target: str,
     mesh_shape: Tuple[int, int],
     test_shape: Tuple[int, int],
+    fabric_config: tt_runtime.runtime.FabricConfig,
     request,
     device,
 ):
@@ -785,6 +794,6 @@ def test_single_allgather_no_spatial(
         pipeline_options=pipeline_options,
         print_ir=True,
         save_artifacts=True,
-        check_pcc=False,
+        check_pcc=True,
         **get_request_kwargs(request),
     )
