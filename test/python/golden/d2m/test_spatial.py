@@ -306,6 +306,63 @@ def all_gather_region_build(
     return _build
 
 
+def all_gather_no_spatial_build(
+    builder: D2MBuilder,
+    input: Operand,
+    output: Operand,
+    load_sem: Operand,
+    store_sem: Operand,
+) -> Operand:
+    ctx = builder.context
+    fabric_connection_config = Attribute.parse(
+        "#ttcore.fabric_connection_config<noc_index = noc0, topology = ring, cluster_axis = 1, routing_mode = unidir_ring_torus, num_links = 1>",
+        ctx,
+    )
+    d0 = AffineDimExpr.get(0, ctx)
+    d1 = AffineDimExpr.get(1, ctx)
+    d2 = AffineDimExpr.get(2, ctx)
+    map2 = AffineMap.get(3, 0, [d1], ctx)
+    map3 = AffineMap.get(3, 0, [d0 + d2], ctx)
+
+    @builder.generic(
+        grid=(2, 1),
+        block_factors=(),
+        indexing_maps=(),
+        iterator_types=[],
+        fabric_connection_config=fabric_connection_config,
+    )
+    def ag_1x8(input, output):
+        _load_sem = load_sem
+        _store_sem = store_sem
+        mesh_row = d2m.mesh_position(dim=0)
+        c1 = arith.constant(IndexType.get(ctx), 1)
+        c0 = arith.constant(IndexType.get(ctx), 0)
+        c8 = arith.constant(IndexType.get(ctx), 8)
+        c_wait = arith.constant(IndexType.get(ctx), 7)
+        core0 = d2m.core_index(0)
+        core1 = d2m.core_index(1)
+        d2m.device_synchronize(_load_sem, [mesh_row, c0], [c1, c8], 7, [core0, core1])
+        core0_1 = d2m.core_index(0)
+        loaded = builder.remote_load(input, [core0_1, c0])
+        mesh_col = d2m.mesh_position(dim=1)
+        idx_row = affine.apply(map2, [mesh_col, core0_1, c0])
+        idx_col = affine.apply(map3, [mesh_col, core0_1, c0])
+        stored = d2m.remote_store(
+            output.type,
+            output,
+            [idx_row, idx_col],
+            start_device=[mesh_row, c0],
+            device_mcast_shape=[c1, c8],
+            semaphore_indices=[core0_1, c0],
+            local_buffer=loaded,
+            semaphore=_store_sem,
+        )
+        d2m.semaphore_wait(_store_sem, c_wait)
+        d2m.yield_([stored])
+
+    return ag_1x8(input, output, additional_args=[load_sem, store_sem])
+
+
 @pytest.mark.parametrize(
     "lhs_shape,rhs_shape,out_shape",
     [
@@ -586,6 +643,114 @@ def test_single_allgather(
                 [((0, 0), (1, 0))],
                 region_builders,
                 result_types=[out_tile.type],
+            )
+            mesh_out_ty = Type.parse(
+                f'tensor<{full_input_shape[0]}x{full_input_shape[1]}xf32, #ttcore.tensor_mesh<"mesh">>',
+                builder.context,
+            )
+            out_mesh_tensor = builder.to_layout(gathered_tile, output_type=mesh_out_ty)
+            out_tensor = prepare_mesh_sharded_output(
+                builder,
+                out_mesh_tensor,
+                full_output_shape,
+                mesh_shape,
+                output_type=host_out_ty,
+            )
+
+            inp_golden = torch.randn(full_input_shape, dtype=torch.float32)
+            golden = torch.cat([inp_golden for _ in range(mesh_shape[1])], dim=1)
+            builder.set_goldens(
+                {inp: inp_golden}, {out_tensor: golden}, set_all_outputs=False
+            )
+            return [out_tensor]
+
+    pipeline_options = [
+        f"mesh-topology=linear,ring",
+    ]
+
+    compile_and_execute_d2m(
+        module,
+        target=target,
+        device=device,
+        mesh_name="mesh",
+        mesh_dict=OrderedDict([("x", mesh_shape[0]), ("y", mesh_shape[1])]),
+        pipeline_options=pipeline_options,
+        print_ir=True,
+        save_artifacts=True,
+        check_pcc=False,
+        **get_request_kwargs(request),
+    )
+
+
+@pytest.mark.parametrize(
+    "mesh_shape",
+    [
+        pytest.param((1, 8), id="1x8"),
+    ],
+)
+@pytest.mark.parametrize(
+    "test_shape",
+    [
+        pytest.param((256, 256), id="256x256"),
+    ],
+)
+@pytest.mark.parametrize(
+    "target",
+    [
+        pytest.param("ttmetal", id="ttmetal"),
+    ],
+)
+def test_single_allgather_no_spatial(
+    target: str,
+    mesh_shape: Tuple[int, int],
+    test_shape: Tuple[int, int],
+    request,
+    device,
+):
+    system_desc_path = request.config.getoption("--sys-desc")
+    full_input_shape = [test_shape[0], test_shape[1] * mesh_shape[1]]
+    full_output_shape = [full_input_shape[0], full_input_shape[1] * mesh_shape[1]]
+
+    def module(builder: D2MBuilder):
+        _insert_default_device_from_system_desc(
+            builder.context, system_desc_path, mesh_shape
+        )
+
+        @builder.func([full_input_shape], [torch.float32])
+        def all_gather(inp: Operand, builder: D2MBuilder):
+            host_out_ty = RankedTensorType.get(
+                full_output_shape,
+                Type.parse("f32", builder.context),
+            )
+            in_grid_shape = (2, 1)
+            in_tile = prepare_mesh_sharded_metal_input(
+                builder,
+                inp,
+                full_input_shape,
+                mesh_shape,
+                (0, 0),
+                grid_shape=in_grid_shape,
+            )
+            out_local_shape = full_input_shape
+            out_grid_shape = (2, 8)
+            out_tile = prepare_metal_output(
+                builder, out_local_shape, (0, 0), grid_shape=out_grid_shape
+            )
+
+            sem_ty = _global_semaphore_backing_tensor_type(builder.context)
+            sem_gs_ty = Type.parse("!d2m.global_semaphore", builder.context)
+            load_sem = d2m.create_global_semaphore(
+                d2m.empty(sem_ty), value=0, results=[sem_gs_ty]
+            )
+            store_sem = d2m.create_global_semaphore(
+                d2m.empty(sem_ty), value=0, results=[sem_gs_ty]
+            )
+            gathered_tile = all_gather_no_spatial_build(
+                builder,
+                in_tile,
+                out_tile,
+                load_sem,
+                store_sem,
             )
             mesh_out_ty = Type.parse(
                 f'tensor<{full_input_shape[0]}x{full_input_shape[1]}xf32, #ttcore.tensor_mesh<"mesh">>',
