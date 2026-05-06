@@ -63,10 +63,22 @@ def _insert_default_device_from_system_desc(
     ctx: Context, system_desc_path: str, mesh_shape: Tuple[int, int]
 ) -> None:
     system_desc = ttcore.ir.SystemDescAttr.get_from_path(ctx, system_desc_path)
-    device_attr = ttcore.ir.DeviceAttr.from_system_desc(
+    default_device_attr = ttcore.ir.DeviceAttr.from_system_desc(
         ctx, system_desc, list(mesh_shape)
     )
-    ttcore.DeviceOp("default_device", device_attr)
+    device_op = ttcore.DeviceOp("default_device", default_device_attr)
+    mesh_topology = ["linear", "ring"]
+
+    default_device_asm = str(default_device_attr)
+    if "meshTopology" not in default_device_asm:
+        default_device_asm = (
+            default_device_asm[:-1] + f", meshTopology = [{', '.join(mesh_topology)}]>"
+        )
+        if not default_device_asm.startswith("#"):
+            default_device_asm = f"#{default_device_asm}"
+        device_op.operation.attributes["device_attr"] = Attribute.parse(
+            default_device_asm, ctx
+        )
 
 
 def prepare_metal_input(
@@ -568,7 +580,7 @@ def test_single_allgather(
                     store_sem,
                 )
             ]
-            spatial_results = builder.spatial(
+            gathered_tile = builder.spatial(
                 [in_tile],
                 [out_tile],
                 [((0, 0), (1, 0))],
@@ -579,9 +591,7 @@ def test_single_allgather(
                 f'tensor<{full_input_shape[0]}x{full_input_shape[1]}xf32, #ttcore.tensor_mesh<"mesh">>',
                 builder.context,
             )
-            out_mesh_tensor = builder.to_layout(
-                spatial_results, output_type=mesh_out_ty
-            )
+            out_mesh_tensor = builder.to_layout(gathered_tile, output_type=mesh_out_ty)
             out_tensor = prepare_mesh_sharded_output(
                 builder,
                 out_mesh_tensor,
@@ -595,7 +605,7 @@ def test_single_allgather(
             builder.set_goldens(
                 {inp: inp_golden}, {out_tensor: golden}, set_all_outputs=False
             )
-            return []
+            return [out_tensor]
 
     pipeline_options = [
         f"mesh-topology=linear,ring",
