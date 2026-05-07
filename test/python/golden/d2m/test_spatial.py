@@ -6,7 +6,7 @@ from builder.base.builder_enums import MeshShardDirection, MeshShardType
 import numpy as np
 import pytest
 import torch
-from typing import Callable, List, Optional, OrderedDict, Tuple
+from typing import Callable, List, OrderedDict, Tuple
 
 from ttmlir.dialects import arith, d2m, tensor
 import _ttmlir_runtime as tt_runtime
@@ -30,9 +30,6 @@ from builder.d2m.d2m_builder import D2MBuilder
 from builder.base.builder_apis import compile_and_execute_d2m
 from ttmlir.dialects import affine, arith, d2m, tensor, ttcore
 from conftest import get_request_kwargs
-from test_utils import (
-    make_shard_shape,
-)
 
 pytestmark = pytest.mark.frontend("d2m")
 
@@ -108,36 +105,25 @@ def prepare_mesh_sharded_metal_input(
     builder: D2MBuilder,
     input_tensor: Operand,
     input_shape: List[int],
-    mesh_shape: Tuple[int, int],
     core_start: Tuple[int, int],
     grid_shape: Tuple[int, int] = (1, 1),
 ) -> Operand:
-    rank_in = len(input_shape)
-    rank_mesh = len(mesh_shape)
-    shard_dims = list(range(rank_in - rank_mesh, rank_in))
-    shard_shape = make_shard_shape(rank_in, shard_dims, mesh_shape)
-    sharded_shape = list(input_shape)
-    for dim, factor in zip(shard_dims, mesh_shape):
-        sharded_shape[dim] = sharded_shape[dim] // factor
-
-    shard_type_attr = ttcore.ir.MeshShardTypeAttr.get(
-        builder.context, MeshShardType.Devices.value
-    )
-    shard_direction_attr = ttcore.ir.MeshShardDirectionAttr.get(
-        builder.context, MeshShardDirection.FullToShard.value
-    )
-    mesh_sharded_ty = Type.parse(
-        f'tensor<{"x".join([str(d) for d in sharded_shape])}xf32, #ttcore.tensor_mesh<"mesh">>',
-        builder.context,
+    sharded_shape = [input_shape[0], input_shape[1] // 8]
+    mesh_sharded_ty = RankedTensorType.get(
+        sharded_shape,
+        input_tensor.type.element_type,
+        Attribute.parse('#ttcore.tensor_mesh<"mesh">', builder.context),
     )
 
     mesh_sharded = d2m.mesh_shard(
         mesh_sharded_ty,
         input_tensor,
-        shard_type_attr,
-        shard_direction_attr,
-        DenseI64ArrayAttr.get(shard_shape),
-        DenseI64ArrayAttr.get(shard_dims),
+        ttcore.ir.MeshShardTypeAttr.get(builder.context, MeshShardType.Devices.value),
+        ttcore.ir.MeshShardDirectionAttr.get(
+            builder.context, MeshShardDirection.FullToShard.value
+        ),
+        DenseI64ArrayAttr.get([1, 8]),
+        DenseI64ArrayAttr.get([-1, 1]),
     )
     return prepare_metal_input(
         builder, mesh_sharded, sharded_shape, core_start, grid_shape=grid_shape
@@ -147,17 +133,10 @@ def prepare_mesh_sharded_metal_input(
 def prepare_mesh_sharded_output(
     builder: D2MBuilder,
     input_tensor: Operand,
-    output_shape: List[int],
-    mesh_shape: Tuple[int, int],
-    output_type: Optional[Type] = None,
 ) -> Operand:
-    rank_in = len(output_shape)
-    rank_mesh = len(mesh_shape)
-    shard_dims = list(range(rank_in - rank_mesh, rank_in))
-    shard_shape = make_shard_shape(rank_in, shard_dims, mesh_shape)
-
-    if output_type is None:
-        output_type = RankedTensorType.get(output_shape, input_tensor.type.element_type)
+    output_shape = list(input_tensor.type.shape)
+    output_shape[1] *= 8
+    output_type = RankedTensorType.get(output_shape, input_tensor.type.element_type)
 
     return d2m.mesh_shard(
         output_type,
@@ -166,8 +145,8 @@ def prepare_mesh_sharded_output(
         ttcore.ir.MeshShardDirectionAttr.get(
             builder.context, MeshShardDirection.ShardToFull.value
         ),
-        DenseI64ArrayAttr.get(shard_shape),
-        DenseI64ArrayAttr.get(shard_dims),
+        DenseI64ArrayAttr.get([1, 8]),
+        DenseI64ArrayAttr.get([0, 1]),
     )
 
 
@@ -597,7 +576,6 @@ def test_single_allgather(
 ):
     system_desc_path = request.config.getoption("--sys-desc")
     full_input_shape = [test_shape[0], test_shape[1] * mesh_shape[1]]
-    full_output_shape = [full_input_shape[0], full_input_shape[1] * mesh_shape[1]]
 
     def module(builder: D2MBuilder):
         _insert_default_device_from_system_desc(
@@ -606,16 +584,11 @@ def test_single_allgather(
 
         @builder.func([full_input_shape], [torch.float32])
         def all_gather(inp: Operand, builder: D2MBuilder):
-            host_out_ty = RankedTensorType.get(
-                full_output_shape,
-                Type.parse("f32", builder.context),
-            )
             in_grid_shape = (2, 1)
             in_tile = prepare_mesh_sharded_metal_input(
                 builder,
                 inp,
                 full_input_shape,
-                mesh_shape,
                 (0, 0),
                 grid_shape=in_grid_shape,
             )
@@ -652,9 +625,6 @@ def test_single_allgather(
             out_tensor = prepare_mesh_sharded_output(
                 builder,
                 out_mesh_tensor,
-                full_output_shape,
-                mesh_shape,
-                output_type=host_out_ty,
             )
 
             inp_golden = torch.randn(full_input_shape, dtype=torch.float32)
@@ -713,7 +683,6 @@ def test_single_allgather_no_spatial(
 ):
     system_desc_path = request.config.getoption("--sys-desc")
     full_input_shape = [test_shape[0], test_shape[1] * mesh_shape[1]]
-    full_output_shape = [full_input_shape[0], full_input_shape[1] * mesh_shape[1]]
 
     def module(builder: D2MBuilder):
         _insert_default_device_from_system_desc(
@@ -722,16 +691,11 @@ def test_single_allgather_no_spatial(
 
         @builder.func([full_input_shape], [torch.float32])
         def all_gather(inp: Operand, builder: D2MBuilder):
-            host_out_ty = RankedTensorType.get(
-                full_output_shape,
-                Type.parse("f32", builder.context),
-            )
             in_grid_shape = (2, 1)
             in_tile = prepare_mesh_sharded_metal_input(
                 builder,
                 inp,
                 full_input_shape,
-                mesh_shape,
                 (0, 0),
                 grid_shape=in_grid_shape,
             )
@@ -764,9 +728,6 @@ def test_single_allgather_no_spatial(
             out_tensor = prepare_mesh_sharded_output(
                 builder,
                 out_mesh_tensor,
-                full_output_shape,
-                mesh_shape,
-                output_type=host_out_ty,
             )
 
             inp_golden = torch.randn(full_input_shape, dtype=torch.float32)
