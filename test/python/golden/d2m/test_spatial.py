@@ -17,7 +17,6 @@ from ttmlir.ir import (
     AffineMap,
     AffineMapAttr,
     Context,
-    DenseI64ArrayAttr,
     DenseElementsAttr,
     IndexType,
     IntegerType,
@@ -108,23 +107,14 @@ def prepare_mesh_sharded_metal_input(
     core_start: Tuple[int, int],
     grid_shape: Tuple[int, int] = (1, 1),
 ) -> Operand:
-    sharded_shape = [input_shape[0], input_shape[1] // 8]
-    mesh_sharded_ty = RankedTensorType.get(
-        sharded_shape,
-        input_tensor.type.element_type,
-        Attribute.parse('#ttcore.tensor_mesh<"mesh">', builder.context),
-    )
-
-    mesh_sharded = d2m.mesh_shard(
-        mesh_sharded_ty,
+    mesh_sharded = builder.mesh_shard(
         input_tensor,
-        ttcore.ir.MeshShardTypeAttr.get(builder.context, MeshShardType.Devices.value),
-        ttcore.ir.MeshShardDirectionAttr.get(
-            builder.context, MeshShardDirection.FullToShard.value
-        ),
-        DenseI64ArrayAttr.get([1, 8]),
-        DenseI64ArrayAttr.get([-1, 1]),
+        MeshShardType.Devices,
+        MeshShardDirection.FullToShard,
+        [1, 8],
+        [-1, 1],
     )
+    sharded_shape = list(mesh_sharded.type.shape)
     return prepare_metal_input(
         builder, mesh_sharded, sharded_shape, core_start, grid_shape=grid_shape
     )
@@ -134,19 +124,12 @@ def prepare_mesh_sharded_output(
     builder: D2MBuilder,
     input_tensor: Operand,
 ) -> Operand:
-    output_shape = list(input_tensor.type.shape)
-    output_shape[1] *= 8
-    output_type = RankedTensorType.get(output_shape, input_tensor.type.element_type)
-
-    return d2m.mesh_shard(
-        output_type,
+    return builder.mesh_shard(
         input_tensor,
-        ttcore.ir.MeshShardTypeAttr.get(builder.context, MeshShardType.Devices.value),
-        ttcore.ir.MeshShardDirectionAttr.get(
-            builder.context, MeshShardDirection.ShardToFull.value
-        ),
-        DenseI64ArrayAttr.get([1, 8]),
-        DenseI64ArrayAttr.get([0, 1]),
+        MeshShardType.Devices,
+        MeshShardDirection.ShardToFull,
+        [1, 8],
+        [0, 1],
     )
 
 
