@@ -100,39 +100,6 @@ def prepare_metal_input(
     return builder.to_layout(input_tensor, output=output)
 
 
-def prepare_mesh_sharded_metal_input(
-    builder: D2MBuilder,
-    input_tensor: Operand,
-    input_shape: List[int],
-    core_start: Tuple[int, int],
-    grid_shape: Tuple[int, int] = (1, 1),
-) -> Operand:
-    mesh_sharded = builder.mesh_shard(
-        input_tensor,
-        MeshShardType.Devices,
-        MeshShardDirection.FullToShard,
-        [1, 8],
-        [-1, 1],
-    )
-    sharded_shape = list(mesh_sharded.type.shape)
-    return prepare_metal_input(
-        builder, mesh_sharded, sharded_shape, core_start, grid_shape=grid_shape
-    )
-
-
-def prepare_mesh_sharded_output(
-    builder: D2MBuilder,
-    input_tensor: Operand,
-) -> Operand:
-    return builder.mesh_shard(
-        input_tensor,
-        MeshShardType.Devices,
-        MeshShardDirection.ShardToFull,
-        [1, 8],
-        [0, 1],
-    )
-
-
 def prepare_metal_output(
     builder: D2MBuilder,
     out_shape: List[int],
@@ -568,10 +535,17 @@ def test_single_allgather(
         @builder.func([full_input_shape], [torch.float32])
         def all_gather(inp: Operand, builder: D2MBuilder):
             in_grid_shape = (2, 1)
-            in_tile = prepare_mesh_sharded_metal_input(
-                builder,
+            mesh_sharded_input = builder.mesh_shard(
                 inp,
-                full_input_shape,
+                MeshShardType.Devices,
+                MeshShardDirection.FullToShard,
+                [1, 8],
+                [-1, 1],
+            )
+            in_tile = prepare_metal_input(
+                builder,
+                mesh_sharded_input,
+                list(mesh_sharded_input.type.shape),
                 (0, 0),
                 grid_shape=in_grid_shape,
             )
@@ -605,9 +579,12 @@ def test_single_allgather(
                 builder.context,
             )
             out_mesh_tensor = builder.to_layout(gathered_tile, output_type=mesh_out_ty)
-            out_tensor = prepare_mesh_sharded_output(
-                builder,
+            out_tensor = builder.mesh_shard(
                 out_mesh_tensor,
+                MeshShardType.Devices,
+                MeshShardDirection.ShardToFull,
+                [1, 8],
+                [0, 1],
             )
 
             inp_golden = torch.randn(full_input_shape, dtype=torch.float32)
@@ -675,10 +652,17 @@ def test_single_allgather_no_spatial(
         @builder.func([full_input_shape], [torch.float32])
         def all_gather(inp: Operand, builder: D2MBuilder):
             in_grid_shape = (2, 1)
-            in_tile = prepare_mesh_sharded_metal_input(
-                builder,
+            mesh_sharded_input = builder.mesh_shard(
                 inp,
-                full_input_shape,
+                MeshShardType.Devices,
+                MeshShardDirection.FullToShard,
+                [1, 8],
+                [-1, 1],
+            )
+            in_tile = prepare_metal_input(
+                builder,
+                mesh_sharded_input,
+                list(mesh_sharded_input.type.shape),
                 (0, 0),
                 grid_shape=in_grid_shape,
             )
@@ -708,9 +692,12 @@ def test_single_allgather_no_spatial(
                 builder.context,
             )
             out_mesh_tensor = builder.to_layout(gathered_tile, output_type=mesh_out_ty)
-            out_tensor = prepare_mesh_sharded_output(
-                builder,
+            out_tensor = builder.mesh_shard(
                 out_mesh_tensor,
+                MeshShardType.Devices,
+                MeshShardDirection.ShardToFull,
+                [1, 8],
+                [0, 1],
             )
 
             inp_golden = torch.randn(full_input_shape, dtype=torch.float32)
