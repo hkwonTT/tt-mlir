@@ -626,13 +626,8 @@ def test_single_allgather(
             )
 
             sem_ty = _global_semaphore_backing_tensor_type(builder.context)
-            sem_gs_ty = Type.parse("!d2m.global_semaphore", builder.context)
-            load_sem = d2m.create_global_semaphore(
-                d2m.empty(sem_ty), value=0, results=[sem_gs_ty]
-            )
-            store_sem = d2m.create_global_semaphore(
-                d2m.empty(sem_ty), value=0, results=[sem_gs_ty]
-            )
+            load_sem = builder.create_global_semaphore(sem_ty, value=0)
+            store_sem = builder.create_global_semaphore(sem_ty, value=0)
             region_builders = [
                 all_gather_region_build(
                     builder,
